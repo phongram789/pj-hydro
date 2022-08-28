@@ -1,70 +1,66 @@
 #include "sw.h"
 #define BLYNK_PRINT Serial
-#include <ESP8266WiFi.h>
-#include <BlynkSimpleEsp8266.h>
+#include <BlynkSimpleEsp32.h>
 #include <PubSubClient.h>
 
 BlynkTimer timer;
-/*--------------------------------------------------*/
-int ledPin = D4;  // GPIO2 = D4
-const char* subscribe_topic = "@msg/temp";
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+char ssid[] = "ooy";
+char pass[] = "0863447295";
+//char auth[] = "tsLOdm66zqk7XRhY8RGD3Xmx-vZOiC8d";
+
+char auth[] = "EBA5sMz-RAWzDwaRsFprgVxE8KKzARtA";
 
 const char* mqtt_server = "broker.netpie.io";
 const int mqtt_port = 1883;
 const char* mqtt_client = "aa47cd89-19f0-4db3-a3df-b823fb50b939";
 const char* mqtt_username = "iWrjeyzumGdQGZM8pSEobjA3cPCUpciE";
 const char* mqtt_password = "n6htDnjn7rLq8_epUM)N-M076iMWy4t4";
-/*--------------------------------------------------*/
-char ssid[] = "ooy";
-char pass[] = "0863447295";
-char auth[] = "Yzir-DlYEFG7DKrYAlfz-7bgzmIO_P02";
-swInput swAuto(D0);
+const char* subscribe_topic = "@msg/temp";
 
-/*--------------------------------------------------*/
-WiFiClient espClient;
-PubSubClient client(espClient);
-/*--------------------------------------------------*/
+swInput swAuto(25);
+
+
+
 void setup() {
+  // put your setup code here, to run once:
   Serial.begin(115200);
   Blynk.begin(auth, ssid, pass, "blynk2.iot-cm.com", 8080); 
-  
-  Serial.print("Connecting to mqtt broker wifi: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, pass);
+
+  //WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+  delay(500);
+  //pinMode(TdsSensorPin,INPUT);
 
+  
 
-  pinMode(hallsensor, INPUT); //initializes digital pin 2 as an input
- Serial.begin(9600); //This is the setup function where the serial port is 
-
-initialised,
- attachInterrupt(0, rpm, RISING); //and the interrupt is attached
 }
 
 void loop() {
-
+  // put your main code here, to run repeatedly:
   if (Blynk.connected()) {
     Blynk.run();
   }
   timer.run();
-  
-  if (!client.connected()) {
-    reconnect();
-  }
+  int test = random(300);
+  Blynk.virtualWrite(V0, test);
   int val = swAuto.get_status();
-  Blynk.virtualWrite(V0, val);
-  client.loop();
-  delay(100);
+  //Serial.print(switch: ");
+  //Serial.println(val);
+  Blynk.virtualWrite(V1, val);
+  mqttloop();
+  //tdsloop();
+  delay(200);
+  
+};
 
-}
 void callback(char* topic,byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
@@ -76,13 +72,11 @@ void callback(char* topic,byte* payload, unsigned int length) {
    Serial.println(msg);
   if (String(topic) == subscribe_topic) { 
     if (msg == "1"){
-      digitalWrite(ledPin, LOW);
+      //digitalWrite(ledPin, LOW);
       Serial.println("Turn on LED");
-      Blynk.virtualWrite(V1, msg);
     } else {
-      digitalWrite(ledPin, HIGH);
+      //digitalWrite(ledPin, HIGH);
       Serial.println("Turn off LED");
-      Blynk.virtualWrite(V1, msg);
     }
   }
 }
