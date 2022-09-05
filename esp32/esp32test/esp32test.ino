@@ -1,3 +1,5 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
 #include "sw.h"
 #include "pinManage.h"
 #include <DHT.h>
