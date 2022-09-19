@@ -15,14 +15,3 @@ swInput swAutoPump(25);
 #define DHTPIN 2
 #define WATERFLOWIN 27
 #define WATERFLOWOUT 33
-
-long currentMillis = 0;
-long previousMillis = 0;
-int interval = 1000;
-boolean ledState = LOW;
-float calibrationFactor = 4.5;
-volatile byte pulseCount;
-byte pulse1Sec = 0;
-float flowRate;
-unsigned int flowMilliLitres;
-unsigned long totalMilliLitres;
