@@ -20,3 +20,7 @@ const int oneWireBus = 33; // GPIO DS18B20 is connected to
 
 #define ECPIN 36
 #define PHPIN 39
+
+// PZEM-004T
+#define RXD0 1
+#define TXD0 3

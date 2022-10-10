@@ -7,7 +7,7 @@ class swInput{
   public:
     swInput(int pin){
       t_pin = pin;
-      pinMode(t_pin,INPUT);
+      pinMode(t_pin,INPUT_PULLUP);
     }
   
     char get_status(){

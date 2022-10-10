@@ -7,6 +7,7 @@
 #include <DHT.h>
 #include <LiquidCrystal_I2C.h>
 #include <BlynkSimpleEsp32.h>
+#include "flow.h"
 
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -18,17 +19,20 @@
 #define MQTT_NAME     "esp"
 
 DHT dht(DHTPIN,DHT22);
+/*FLOW flowA(waterFlowA);
+FLOW flowB(waterFlowB);
+FLOW flowPH(waterFlowPH);*/
 WiFiClient client;
 PubSubClient mqtt(client);
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 const char* ssid ="ooy2G";
-const char* password =  "0863447295";
-
+const char* passwd =  "0863447295";
 
 OneWire oneWire(oneWireBus); // Setup a oneWire instance to communicate with any OneWire devices
 DallasTemperature DS18B20(&oneWire); // Pass our oneWire reference to Dallas Temperature sensor 
 
+float flowAValue,flowBValue,flowPHValue;
 
 float humidity;
 float temperature;
@@ -38,17 +42,27 @@ float voltagePH,phValue;
 float acidVoltage = 1810;
 float neutralVoltage = 1370;
 
+//PZEM
+int requesstCount = 0;
+unsigned long timeOut_PZEM = millis();
+uint8_t bufferModbus [25];
+float fVoltage,fCurrent,fPower,fEnergy,fFrequency;
+
+int statusWiFi = WL_IDLE_STATUS;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  WiFi.begin(ssid, password);
+  Serial2.begin(9600,SERIAL_8N1,RXD0,TXD0);
+  while (!Serial2);
+  WiFi.begin(ssid, passwd);
   while (WiFi.status() != WL_CONNECTED) {
-  delay(500);
-  Serial.println("Connecting to WiFi..");
-}
+    delay(500);
+    Serial.println("Connecting to WiFi..");
+  }
   Serial.println("IP ad :");
   Serial.println(WiFi.localIP());
-
+  
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   //mqtt.setCallback(callback); open when include Callback
   dht.begin();
@@ -59,7 +73,8 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  
+
+  PZEM();
   DHT();
   swTopfloat.get_status();      //get status of water level on top
   swButtomfloat.get_status();   //get status of water level on button
@@ -134,13 +149,32 @@ void loop() {
   Serial.print(volt);
   Serial.print("\tCurrent = ");
   Serial.println(current);
-  
+
+  //------------------IF WIFI LOST CONNECTED---------------
+  if(WiFi.status() != WL_CONNECTED){
+    statusWiFi = WiFi.status();
+    Serial.println("Reconnecting WiFi");
+    if(statusWiFi != WL_CONNECTED){
+      WiFi.begin(ssid,passwd);
+      while(WiFi.status() != WL_CONNECTED){
+        delay(500);
+        Serial.print(".");
+      }
+      Serial.println("Connected to AP");
+      Serial.print("IP address: ");
+      Serial.println(WiFi.localIP());
+    }
+  }
+
   if (mqtt.connected() == false) {
+    Serial.println(WiFi.status());
     Serial.print("MQTT connection... ");
     if (mqtt.connect(MQTT_NAME, MQTT_USERNAME, MQTT_PASSWORD)) {
+      mqttConnected = true;
       Serial.println("connected");
       //mqtt.subscribe("/ESP32_1/LED");
     } else {
+      mqttConnected = false;
       Serial.println("failed");
       delay(5000);
     }
@@ -162,6 +196,7 @@ void DHT()
   //Blynk.virtualWrite(V3, temperature);
   if (isnan(humidity) || isnan(temperature) ) {
     Serial.println(F("Failed to read from DHT sensor!"));
+    humidity = -1;
     return;
   }
   delay(2000);
@@ -186,3 +221,50 @@ void DallasTemp(){
     temperatureC = DS18B20.getTempCByIndex(0);
   }
 };
+
+void PZEM(){
+  if(millis() - timeOut_PZEM > 2222){
+    //Request 
+    Serial2.write(0xF8);
+    Serial2.write(0x04);
+    Serial2.write(0x00);
+    Serial2.write(0x00);
+    Serial2.write(0x0A);
+    Serial2.write(0x64);
+    Serial2.write(0x64);
+    timeOut_PZEM = millis();
+  }
+  if(Serial2.available()){
+    for(int i = 0 ; i < 25 ; i++){
+      if(!Serial2.available()){
+        Serial.println("data not match");
+        break;
+      }
+      bufferModbus[i] = Serial2.read();
+      delay(20);
+    }
+  }
+  uint32_t voltage = (uint32_t)bufferModbus[3] << 8 | (uint32_t)bufferModbus[4];
+  uint32_t current = (uint32_t)bufferModbus[5] << 8 | (uint32_t)bufferModbus[6] | (uint32_t)bufferModbus[7] << 24 | (uint32_t)bufferModbus[8] << 16;
+  uint32_t power = (uint32_t)bufferModbus[9] << 8 | (uint32_t)bufferModbus[10] | (uint32_t)bufferModbus[11] << 24 | (uint32_t)bufferModbus[12] << 16;
+  uint32_t energy = (uint32_t)bufferModbus[13] << 8 | (uint32_t)bufferModbus[14] | (uint32_t)bufferModbus[15] << 24 | (uint32_t)bufferModbus[16] << 16;
+  uint32_t frequecy = (uint32_t)bufferModbus[17] << 8 | (uint32_t)bufferModbus[18];
+
+  fVoltage = voltage * 0.1;
+  fCurrent = current * 0.001;
+  fPower = power * 0.1;
+  fEnergy = energy * 0.001;
+  fFrequency = frequecy * 0.1;
+
+  Serial.println("------------------------------");
+  Serial.println("Voltage = " + String(fVoltage));
+  Serial.println("Current = " + String(fCurrent));
+  Serial.println("Power   = " + String(fPower));
+  Serial.println("Energy  = " + String(fEnergy));
+  Serial.println("Freq    = " + String(fFrequency));
+
+  while (Serial2.available())
+    {
+      Serial2.read();
+    }
+}
