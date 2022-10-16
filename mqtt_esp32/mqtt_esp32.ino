@@ -19,6 +19,9 @@
 #define MQTT_NAME     "esp"
 
 DHT dht(DHTPIN,DHT22);
+
+FLOW sensorFlowA(waterFlowA);
+
 /*FLOW flowA(waterFlowA);
 FLOW flowB(waterFlowB);
 FLOW flowPH(waterFlowPH);*/
@@ -50,6 +53,15 @@ float fVoltage,fCurrent,fPower,fEnergy,fFrequency;
 
 int statusWiFi = WL_IDLE_STATUS;
 
+float flowrateA;
+//------------------time interval------------------------------
+unsigned long time1 = 0; //for sensor water flow to get flowtare 
+#define INTERVAL1 1200
+
+void pulseSensorFlowA(){
+  sensorFlowA.pulseCounter();
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -69,6 +81,7 @@ void setup() {
   DS18B20.begin(); //Dallas Temperature IC Control Library
   lcd.init();
   lcd.backlight();
+  attachInterrupt(digitalPinToInterrupt(sensorFlowA.SENSOR), pulseSensorFlowA, FALLING);
 }
 
 void loop() {
@@ -78,6 +91,14 @@ void loop() {
   DHT();
   swTopfloat.get_status();      //get status of water level on top
   swButtomfloat.get_status();   //get status of water level on button
+
+  if(millis() - time1 > INTERVAL1){
+    time1 = millis();
+    flowrateA = sensorFlowA.read();
+  }
+  Serial.print("Flow rate1: ");
+  Serial.print(flowrateA);
+  Serial.println("L/min");
   
 //--------------------------- switch Light --------------------------------------
 
