@@ -1,17 +1,18 @@
-#include<WiFi.h>
-#include<PubSubClient.h>
-//#include <Wire.h>
-#include "sw.h"
-#include "pinMange.h"
-#include "status.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
 #include <DHT.h>
 #include <LiquidCrystal_I2C.h>
 #include <BlynkSimpleEsp32.h>
-#include "flow.h"
-
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+#include "sw.h"
+#include "pinMange.h"
+#include "status.h"
+#include "tds.h"
+#include "flow.h"
+
+//#include <Wire.h>
 #define MQTT_SERVER   "192.168.1.51"
 #define MQTT_PORT     1883
 #define MQTT_USERNAME "esp"      
@@ -22,9 +23,6 @@ DHT dht(DHTPIN,DHT22);
 
 FLOW sensorFlowA(waterFlowA);
 
-/*FLOW flowA(waterFlowA);
-FLOW flowB(waterFlowB);
-FLOW flowPH(waterFlowPH);*/
 WiFiClient client;
 PubSubClient mqtt(client);
 LiquidCrystal_I2C lcd(0x27, 20, 4);
@@ -39,8 +37,11 @@ float flowAValue,flowBValue,flowPHValue;
 
 float humidity;
 float temperature;
-float temperatureC;//Dallas
 
+//Dallas
+float temperatureC;
+
+//pH
 float voltagePH,phValue;
 float acidVoltage = 1810;
 float neutralVoltage = 1370;
@@ -53,12 +54,17 @@ float fVoltage,fCurrent,fPower,fEnergy,fFrequency;
 
 int statusWiFi = WL_IDLE_STATUS;
 
+//flow
 float flowrateA;
+
+//EC
+TDS tds(ECPIN);
+float ecValue;
 //------------------time interval------------------------------
 unsigned long time1 = 0; //for sensor water flow to get flowtare 
 #define INTERVAL1 1200
 
-void pulseSensorFlowA(){
+void IRAM_ATTR pulseSensorFlowA(){
   sensorFlowA.pulseCounter();
 }
 
@@ -81,7 +87,7 @@ void setup() {
   DS18B20.begin(); //Dallas Temperature IC Control Library
   lcd.init();
   lcd.backlight();
-  attachInterrupt(digitalPinToInterrupt(sensorFlowA.SENSOR), pulseSensorFlowA, FALLING);
+  attachInterrupt(digitalPinToInterrupt(sensorFlowA.SENSOR), pulseSensorFlowA, FALLING); //https://lastminuteengineers.com/handling-esp32-gpio-interrupts-tutorial/
 }
 
 void loop() {
@@ -91,6 +97,13 @@ void loop() {
   DHT();
   swTopfloat.get_status();      //get status of water level on top
   swButtomfloat.get_status();   //get status of water level on button
+
+  tds.calTDS();
+  ecValue = tds.getEC();
+  Serial.print("EC = ");
+  Serial.print(ecValue);
+  Serial.println("\t");
+
 
   if(millis() - time1 > INTERVAL1){
     time1 = millis();
@@ -230,8 +243,6 @@ void PH(){
     float slope = (7.0-4.0)/((neutralVoltage-1500)/3.0 - (acidVoltage-1500)/3.0); //two point: (_NautralVoltage,7.0),(_acidVoltage,4.0)
     float intercept = 7.0 - slope*(neutralVoltage-1500)/3.0;
     phValue = slope*(voltagePH-1500)/3.0+intercept; //y = k*x +b
-
-    
   }
   
 };

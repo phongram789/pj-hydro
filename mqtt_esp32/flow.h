@@ -43,4 +43,7 @@ class FLOW{
         return flowRate;
       }
     };
+    float Totalwater(){
+      return totalMilliLitres; //mL
+    }
 };
