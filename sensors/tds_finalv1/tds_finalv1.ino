@@ -16,7 +16,7 @@ void loop() {
   TdsValue = tds.getTds();
   Serial.print("EC IS:");
   Serial.print(ecValue);
-  Serial.println("us/cm");
+  Serial.println("us/cm"); //*0.001 ms/cm
   Serial.print("TDS IS: ");
   Serial.print(TdsValue);
   Serial.println(" ppm");
