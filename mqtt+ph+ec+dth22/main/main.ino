@@ -2,11 +2,11 @@
 #include <PubSubClient.h>
 #include "tds.h"
 #include "DHT.h"
-#define DHTPIN 26
-#define PHPIN 39
-#define ECPIN 36
+#include "pin.h"
+#include "flow.h"
 #define DHTTYPE DHT22 
 TDS tds(ECPIN);
+FLOW flowA(FLOW_P);
 WiFiClient client;
 PubSubClient mqtt(client);
 DHT dht(DHTPIN, DHTTYPE);
@@ -20,8 +20,8 @@ const char* mqtt_password = "n6htDnjn7rLq8_epUM)N-M076iMWy4t4";
 
 //-----------Time current-------------
 unsigned long currentMillis = 0; //for function millis() main current time for board
-
-
+unsigned long TIME_FLOW = 0;
+const long interval = 1000;
 
 float h,t; //humidity and temperature
 //-------------pH-----------------
@@ -30,8 +30,14 @@ float acidVoltage = 1810;
 float neutralVoltage = 1370;
 //--------------------------------
 float ecValue,TdsValue;
+
+void IRAM_ATTR pulseCounterFlowA(){
+  flowA.pulseCounter();
+}
+
 void setup() {
   Serial.begin(115200);
+  attachInterrupt(digitalPinToInterrupt(flowA.t_pin), pulseCounterFlowA, FALLING);
   initWiFi(); // function connect WiFi
   mqtt.setServer(mqtt_server, mqtt_port);
   dht.begin();
@@ -40,10 +46,17 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
+  flow();
   readDHT();
   PH();
   Ec();
   Mqttreconnect();
+}
+void flow(){
+  if (currentMillis - TIME_FLOW > interval) { // currentMillis - TIME_FLOW > interval
+    TIME_FLOW = flowA.previousMillis;
+    flowA.readFlowrate();
+  }
 }
 void Ec(){
   static unsigned long timepoint = millis();
