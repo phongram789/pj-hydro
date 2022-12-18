@@ -10,7 +10,7 @@ class FLOW{
     unsigned long totalMilliLitres;
   public:
     int t_pin;
-    long previousMillis = 0;
+    unsigned long previousMillis = 0;
     FLOW(int pin){
       t_pin = pin;
       pinMode(t_pin, INPUT_PULLUP);
