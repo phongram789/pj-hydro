@@ -4,7 +4,7 @@
 #include "DHT.h"
 #include "pin.h"
 #include "flow.h"
-#define DHTTYPE DHT22 
+#define DHTTYPE DHT22
 TDS tds(ECPIN);
 FLOW flowA(FLOW_P);
 WiFiClient client;
@@ -28,8 +28,10 @@ float h,t; //humidity and temperature
 float voltagePH,phValue;
 float acidVoltage = 1810;
 float neutralVoltage = 1370;
+const int smoothFactor = 10;
+float lastPH = 0;
 //--------------------------------
-float ecValue,TdsValue;
+float ecValue,TdsValue,lastEC;
 
 void IRAM_ATTR pulseCounterFlowA(){
   flowA.pulseCounter();
@@ -51,6 +53,8 @@ void loop() {
   PH();
   Ec();
   Mqttreconnect();
+  saveLedStates(); // save the state of the ---- to non-volatile memory every 10 seconds
+  
 }
 void flow(){
   if (currentMillis - TIME_FLOW > interval) { // currentMillis - TIME_FLOW > interval
@@ -59,18 +63,29 @@ void flow(){
   }
 }
 void Ec(){
-  static unsigned long timepoint = millis();
-  if(currentMillis - timepoint >= 2000U){
+  static int sum = 0; // variable to store the sum of the readings
+  static int count = 0; // variable to store the number of readings
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 200U){
      timepoint = currentMillis;
      tds.calTDS();
      ecValue = tds.getEC()*0.001;
-   }
-   Serial.print("EC: ");
-   Serial.print(ecValue);
-   Serial.println(" ms/cm");
+     sum += ecValue;// add the current reading to the sum
+     count++;// increment the count of readings
+     if (count == smoothFactor) {
+      // calculate the average of the readings
+      lastEC = sum / smoothFactor;
+      // reset the sum and count for the next set of readings
+      sum = 0;
+      count = 0;
+      Serial.print("EC: ");
+      Serial.print(lastEC);
+      Serial.println(" ms/cm");
+     }
+  }
 }
 void Mqttreconnect(){
-  static unsigned long timepoint = millis();
+  static unsigned long timepoint = 0;
   if(currentMillis - timepoint >= 2000U){
     timepoint = currentMillis;
     if (mqtt.connected() == false) {
@@ -85,7 +100,7 @@ void Mqttreconnect(){
     }
     else {
       mqtt.loop();
-      String dataJS = "{\"temp\":" + String(t) + ",\"hum\":" +String(h) + ",\"ec\":" +String(ecValue) + ",\"ph\":" +String(phValue) + "}";
+      String dataJS = "{\"temp\":" + String(t) + ",\"hum\":" +String(h) + ",\"ec\":" +String(ecValue) + ",\"ph\":" +String(lastPH) + "}";
       char json[100];
       dataJS.toCharArray(json,dataJS.length()+1);
       mqtt.publish("@msg/v1/devices/me/telemetry", json);
@@ -102,7 +117,7 @@ void initWiFi() {
   Serial.println(WiFi.localIP());
 };
 void readDHT(){
-  static unsigned long timepoint = millis();
+  static unsigned long timepoint = 0;
   if(currentMillis - timepoint >= 2000U){
     timepoint = currentMillis;
     h = dht.readHumidity();
@@ -120,19 +135,50 @@ void readDHT(){
 };
 
 void PH(){
-  static unsigned long timepoint = millis();
-  if(currentMillis - timepoint >= 1000U){
+  static int sum = 0; // variable to store the sum of the readings
+  static int count = 0; // variable to store the number of readings
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 100U){
     timepoint = currentMillis;
     float analogValue = analogRead(PHPIN);
-    /*Serial.print("analogValue from pH");
-    Serial.println(analogValue);*/
     voltagePH = analogValue/4095.0*3300; //read the voltage  
-    /*Serial.print("voltage from pH");
-    Serial.println(voltagePH);*/
     float slope = (7.0-4.0)/((neutralVoltage-1500)/3.0 - (acidVoltage-1500)/3.0); //two point: (_NautralVoltage,7.0),(_acidVoltage,4.0)
     float intercept = 7.0 - slope*(neutralVoltage-1500)/3.0;
     phValue = slope*(voltagePH-1500)/3.0+intercept; //y = k*x +b
+    //----------------------AFTER CALCULATE---------------------------
+    sum += phValue;// add the current reading to the sum
+    count++;// increment the count of readings
+    if (count == smoothFactor) {
+      // calculate the average of the readings
+      lastPH = sum / smoothFactor;
+      Serial.print("pH: ");
+      Serial.println(lastPH);
+      // reset the sum and count for the next set of readings
+      sum = 0;
+      count = 0;
+    }
   }
-  Serial.print("pH: ");
-  Serial.println(phValue);
+};
+
+void saveLedStates() {
+  static unsigned long lastSaveTime = 0;
+  if (currentMillis - lastSaveTime > 10000U) {
+    lastSaveTime = currentMillis;
+    /*
+    // read the current states of the LEDs
+    int led1State = digitalRead(LED1_PIN);
+    int led2State = digitalRead(LED2_PIN);
+    int led3State = digitalRead(LED3_PIN);
+    int led4State = digitalRead(LED4_PIN);
+  
+    // write the LED states to non-volatile memory
+    EEPROM.write(LED1_STATE_ADDRESS, led1State);
+    EEPROM.write(LED2_STATE_ADDRESS, led2State);
+    EEPROM.write(LED3_STATE_ADDRESS, led3State);
+    EEPROM.write(LED4_STATE_ADDRESS, led4State);
+  
+    // commit the data to non-volatile memory
+    EEPROM.commit();
+    */
+  }
 };

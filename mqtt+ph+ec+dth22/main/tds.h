@@ -11,7 +11,6 @@ class TDS{
     float temperature = 25;
     float tdsValue;
     float kValue = 1.38;
-
     float KValueTemp,rawECsolution;
 
   public:

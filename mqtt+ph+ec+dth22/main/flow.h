@@ -14,7 +14,7 @@ class FLOW{
     FLOW(int pin){
       t_pin = pin;
       pinMode(t_pin, INPUT_PULLUP);
-      previousMillis = 0;
+      previousMillis = 0; 
       pulseCount = 0;
       flowRate = 0.0;
       flowMilliLitres = 0;
