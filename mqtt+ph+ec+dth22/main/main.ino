@@ -164,6 +164,7 @@ void saveLedStates() {
   static unsigned long lastSaveTime = 0;
   if (currentMillis - lastSaveTime > 10000U) {
     lastSaveTime = currentMillis;
+    Serial.println("saveLedStates working");
     /*
     // read the current states of the LEDs
     int led1State = digitalRead(LED1_PIN);

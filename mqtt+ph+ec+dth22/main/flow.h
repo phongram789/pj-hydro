@@ -30,7 +30,7 @@ class FLOW{
       previousMillis = millis();
       flowMilliLitres = (flowRate / 60) * 1000;
       totalMilliLitres += flowMilliLitres;
-      /*Serial.print("Flow rate: ");
+      Serial.print("Flow rate: ");
       Serial.print(int(flowRate));  // Print the integer part of the variable
       Serial.print("L/min");
       Serial.print("\t");       // Print tab space
@@ -40,7 +40,7 @@ class FLOW{
       Serial.print(totalMilliLitres);
       Serial.print("mL / ");
       Serial.print(totalMilliLitres / 1000);
-      Serial.println("L");*/
+      Serial.println("L");
       return flowRate;
     }
     float Totalwater(){
