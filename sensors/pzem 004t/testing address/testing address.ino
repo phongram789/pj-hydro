@@ -1,6 +1,6 @@
 #include <PZEM004Tv30.h>
 
-PZEM004Tv30 pzem1(16,17,0x07);
+PZEM004Tv30 pzem1(16,17,);
 PZEM004Tv30 pzem2(16,17,0x08);
 PZEM004Tv30 pzem3(16,17,0x09);
 

@@ -1,27 +1,29 @@
 #include <ModbusMaster.h>
-ModbusMaster node;  //ModbusRTU Relay Slave ID1
-#define RX2 16        //RX
-#define TX2 17        //TX
-uint16_t valueSW1;
+
+#define MODBUS_SERIAL_PORT Serial1  // Modbus RTU relay is connected to Serial1 port on the master
+#define MODBUS_ADDRESS 0            // Modbus RTU address of the relay
+#define RELAY_REGISTER_ADDRESS 1    // Address of the relay's control register
+
+ModbusMaster node;  // Create a ModbusMaster object
+
 void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  Serial2.begin(9600, SERIAL_8N1, RX2, TX2);  //RX2=16,RO ,TX2=17, DI
-  node.begin(1, Serial2);
+  MODBUS_SERIAL_PORT.begin(9600, SERIAL_8N1, 16, 17);  // Initialize the serial port for Modbus communication
+  node.begin(MODBUS_ADDRESS, MODBUS_SERIAL_PORT);  // Start the Modbus communication
 }
 
 void loop() {
-  valueSW1 = random(1,3);
-  test1();
-  delay(500);
-  Serial.println(valueSW1);
-  Serial.println("end");
+  // Turn the relay on
+  uint16_t value = 1;
+  node.writeSingleRegister(RELAY_REGISTER_ADDRESS, value);
+  node.writeSingleCoil(0, 8);
 
-}
-void test1(){
-  if(valueSW1 == 1){
-    node.writeSingleRegister(1, valueSW1);
-  } else {
-    node.writeSingleRegister(1, valueSW1);
-  }
+  // Wait for 1 second
+  delay(1000);
+
+  // Turn the relay off
+  value = 2;
+  node.writeSingleRegister(RELAY_REGISTER_ADDRESS, value);
+
+  // Wait for 1 second
+  delay(1000);
 }

@@ -1,8 +1,8 @@
-
 #include <PZEM004Tv30.h>
 #include <ModbusMaster.h>
 ModbusMaster node;
 uint16_t valueSW1;
+
 /* Hardware Serial2 is only available on certain boards.
  * For example the Arduino MEGA 2560
 */
@@ -13,7 +13,7 @@ void setup() {
     Serial.begin(115200);
     Serial1.begin(9600, SERIAL_8N1, 16, 17);
     
-    node.begin(1, Serial1);
+    node.begin(0, Serial1);
 
     // Uncomment in order to reset the internal energy counter
     // pzem.resetEnergy()
@@ -68,6 +68,6 @@ void test1(){
   if(valueSW1 == 1){
     node.writeSingleRegister(1, valueSW1);
   } else {
-    node.writeSingleRegister(1, valueSW1);
+    node.writeSingleRegister(1, 02);
   }
 }

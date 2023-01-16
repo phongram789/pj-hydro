@@ -4,12 +4,15 @@
 #include "DHT.h"
 #include "pin.h"
 #include "flow.h"
+#include "SerialCommand.h"
+#include "Input_pullup.h"
 #define DHTTYPE DHT22
 TDS tds(ECPIN);
-FLOW flowA(FLOW_P);
+FLOW flowA(FLOW_P,7.5);
 WiFiClient client;
 PubSubClient mqtt(client);
 DHT dht(DHTPIN, DHTTYPE);
+
 const char* ssid = "ooy2G";
 const char* password = "0863447295";
 const char* mqtt_server = "broker.netpie.io";
@@ -39,6 +42,8 @@ void IRAM_ATTR pulseCounterFlowA(){
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(9600, SERIAL_8N1, RX2, TX2);
+  closeRTU();
   attachInterrupt(digitalPinToInterrupt(flowA.t_pin), pulseCounterFlowA, FALLING);
   initWiFi(); // function connect WiFi
   mqtt.setServer(mqtt_server, mqtt_port);
@@ -58,8 +63,8 @@ void loop() {
 }
 void flow(){
   if (currentMillis - TIME_FLOW > interval) { // currentMillis - TIME_FLOW > interval
-    TIME_FLOW = flowA.previousMillis;
-    flowA.readFlowrate();
+    flowA.readFlowrate(currentMillis);
+    TIME_FLOW = currentMillis;
   }
 }
 void Ec(){

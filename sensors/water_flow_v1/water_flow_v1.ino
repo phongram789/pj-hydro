@@ -1,10 +1,11 @@
-#include"flow.h"
-#define FLOW_P  27
-FLOW flowA(FLOW_P);
-
-unsigned long currentMillis = 0; // millis()
-unsigned long TIME_FLOW = 0; // previousMillis for water flow sensors function flow()
-const long interval = 1000;
+#include "flow.h";
+#define FLOW_P  26
+FLOW flowA(FLOW_P,7.5);
+unsigned long time_1 = 0; //
+unsigned long time_2 = 0; //
+unsigned long currentMillis = 0;
+unsigned long previousMill = 0;
+int interval = 1000; // 1 Sec
 
 void IRAM_ATTR pulseCounterFlowA(){
   flowA.pulseCounter();
@@ -13,26 +14,41 @@ void IRAM_ATTR pulseCounterFlowA(){
 void setup()
 {
   Serial.begin(115200);
+
+  //pinMode(SENSOR, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(flowA.t_pin), pulseCounterFlowA, FALLING);
 }
 
 void loop(){
-  currentMillis = millis(); // only one millis()
+  currentMillis = millis();
   flow();
-  resetTimeMillis(); //last line in void loop to reset currentMillis;
+  someOtherFunction();
+  PH();
 }
-
 void flow(){
-  if (currentMillis - TIME_FLOW > interval) { // currentMillis - TIME_FLOW > interval
-    TIME_FLOW = flowA.previousMillis;
-    flowA.readFlowrate();
+  if (currentMillis - previousMill > interval) {
+    flowA.readFlowrate(currentMillis);
+    previousMill = currentMillis;
   }
 }
-
-void resetTimeMillis(){
-  if (currentMillis >= 4294967294) {
-    //maximum value it can hold (4,294,967,295 milliseconds, or approximately 49.7 days)
-    // reset the value to 0
-    currentMillis = 0;
+void someOtherFunction() {
+  static unsigned long timepoint = 0;
+  if (currentMillis - timepoint >= 1000U) {
+    timepoint = currentMillis;
+    //Serial.println(timepoint);
+  }
+  if (currentMillis - time_2 >= interval*2) {
+    time_2 = currentMillis;
+    //Serial.println(time_2);
   }
 }
+void PH(){
+  static unsigned long timepoint = 0;
+  if(currentMillis-timepoint >= 1000U){
+    timepoint = currentMillis;
+    /*Serial.print("pH: ");
+  	Serial.println(timepoint);*/
+  }
+  
+  
+};

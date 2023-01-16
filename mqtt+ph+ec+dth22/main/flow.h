@@ -11,10 +11,11 @@ class FLOW{
   public:
     int t_pin;
     unsigned long previousMillis = 0;
-    FLOW(int pin){
+    FLOW(int pin,float Factor){
+      Factor = calibrationFactor;
       t_pin = pin;
       pinMode(t_pin, INPUT_PULLUP);
-      previousMillis = 0; 
+      previousMillis = 0;
       pulseCount = 0;
       flowRate = 0.0;
       flowMilliLitres = 0;
@@ -23,14 +24,14 @@ class FLOW{
     void pulseCounter(){
       pulseCount++;
     }
-    double readFlowrate(){
+    void readFlowrate(unsigned currentMillis){
       pulse1Sec = pulseCount;
       pulseCount = 0;
-      flowRate = ((1000.0 / (millis() - previousMillis)) * pulse1Sec) / calibrationFactor;
-      previousMillis = millis();
+      flowRate = ((1000.0 / (currentMillis - previousMillis)) * pulse1Sec) / calibrationFactor;
+      previousMillis += currentMillis;
       flowMilliLitres = (flowRate / 60) * 1000;
       totalMilliLitres += flowMilliLitres;
-      Serial.print("Flow rate: ");
+      /*Serial.print("Flow rate: ");
       Serial.print(int(flowRate));  // Print the integer part of the variable
       Serial.print("L/min");
       Serial.print("\t");       // Print tab space
@@ -41,11 +42,12 @@ class FLOW{
       Serial.print("mL / ");
       Serial.print(totalMilliLitres / 1000);
       Serial.println("L");
-      return flowRate;
+      //return flowRate;*/
     }
     float Totalwater(){
       return totalMilliLitres; //mL
     }
+    
 
 
 };
@@ -60,7 +62,7 @@ unsigned long previousMillis2 = 0;
 class test{
   private:
   public:
-    long previousMillis = 0;
+  	long previousMillis = 0;
     int cal(){
       previousMillis = millis();
       return previousMillis;
