@@ -3,6 +3,14 @@
 #include <PubSubClient.h>
 #include <BlynkSimpleEsp32.h>
 #include <TimeLib.h>
+
+#include <Wire.h>
+#include "DS3231.h"
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+RTClib RTC;
+
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 BlynkTimer timer;
@@ -29,6 +37,9 @@ bool statusBlynk,statusMqtt,statusWifi;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  lcd.init();
+  lcd.backlight();
+  Wire.begin();//เริ่มการสื่อสารแบบ I2C
   initWiFi();
   mqtt.setServer(mqtt_server, mqtt_port);
   mqtt.setCallback(callback);
@@ -40,10 +51,12 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
+  RTCfunction();
   Mqttreconnect();
   timer.run();
   reconnectBlynk();
-  statusConnecting();
+  //SerialstatusConnecting();
+  functionLcd();
 
 }
 
@@ -56,22 +69,24 @@ void sendSensor(){
 
 void Mqttreconnect(){
   static unsigned long timepoint = 0;
-  if(currentMillis - timepoint >= 2000U){
+  if(currentMillis - timepoint >= 5000U){
     timepoint = currentMillis;
     if (mqtt.connected() == false) {
+      statusMqtt = mqtt.connected();
       Serial.print("MQTT connection... ");
       if (mqtt.connect(mqtt_client, mqtt_username, mqtt_password)){
         mqtt.subscribe(subscribe_topic);// DONT FORGET
         Serial.println("connected");
+        statusMqtt = mqtt.connected();
       } 
       else{
+        statusMqtt = mqtt.connected();
         Serial.println("failed");
-        delay(5000);
+        delay(1000); //fix to millis 
       }
     }
     else {
       mqtt.loop();
-      statusMqtt = mqtt.connected();
       String dataJS = "{\"temp\":" + String(t) + ",\"hum\":" +String(h) + ",\"ec\":" +String(ecValue) + ",\"ph\":" +String(lastPH) + "}";
       char json[100];
       dataJS.toCharArray(json,dataJS.length()+1);
@@ -82,17 +97,21 @@ void Mqttreconnect(){
 
 void initWiFi() { 
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Connecting to WiFi..");
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print('.');
     delay(1000);
   }
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+  lcd.clear();
+  lcd.setCursor(3,0);
+  lcd.print("WiFi Connected");
+  lcd.setCursor(0,1);
+  lcd.print(String(WiFi.localIP()));
   Serial.println(WiFi.localIP());
   statusWifi = WiFi.status();
+  delay(2000);
 
 };
 
@@ -129,21 +148,7 @@ void reconnectBlynk(){
     }
   }
 }
-void statusConnecting(){
-  static unsigned long timepoint = 0;
-  if(currentMillis - timepoint >= 10000U){
-    timepoint = currentMillis;
-    Serial.print("status of WiFi :");
-    Serial.print(statusWifi);
-    Serial.print("\t");
-    Serial.print("status of Blynk :");
-    Serial.print(statusBlynk);
-    Serial.print("\t");
-    Serial.print("status of Mqtt :");
-    Serial.println(statusMqtt);
-    //Blynk.sendInternal("rtc", "sync"); //request current local time for device
-  }
-};
+
 
 long timer_start_set[2] = {0xFFFF, 0xFFFF};
 long timer_stop_set[2] = {0xFFFF, 0xFFFF};
@@ -191,4 +196,118 @@ BLYNK_WRITE(V0)
   }
 }
 
+void SerialstatusConnecting(){
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 10000U){
+    timepoint = currentMillis;
+    Serial.print("status of WiFi :");
+    Serial.print(statusWifi);
+    Serial.print("\t");
+    Serial.print("status of Blynk :");
+    Serial.print(statusBlynk);
+    Serial.print("\t");
+    Serial.print("status of Mqtt :");
+    Serial.println(statusMqtt);
+    //Blynk.sendInternal("rtc", "sync"); //request current local time for device
+  }
+};
 
+void functionLcd(){
+    static unsigned long lastSaveTime = 0;
+    static unsigned long currentPageTime = 0;
+    static int currentPage = 0;
+    if (currentMillis - currentPageTime >= 10000U) {
+      currentPageTime = currentMillis;
+      currentPage++;
+      currentPage = currentPage % 3;
+
+    }
+    if (currentMillis - lastSaveTime >= 1000U) {
+      lastSaveTime = currentMillis;
+      // clear the screen
+      switch(currentPage) {
+        case 0:
+          lcd.clear();
+          lcd.setCursor(0,0);
+          lcd.print("Temp  :" + String(t) + " c"); //"/n"
+          lcd.setCursor(0,1);
+          lcd.print("humid :" + String(h) + " %");
+          lcd.setCursor(0,2);
+          lcd.print("EC    :" + String(ecValue) + " mS/cm");
+          lcd.setCursor(0,3);
+          lcd.print("pH    :" + String(lastPH));
+          break;
+        case 1:
+          lcd.clear();
+          if(statusMqtt == 1 ){
+            lcd.setCursor(0,0);
+            lcd.print("Mqtt: connected");
+          }
+          else{
+            lcd.setCursor(0,0);
+            lcd.print("Mqtt: not connected");
+          }
+          if(statusBlynk == 1 ){
+            lcd.setCursor(0,1);
+            lcd.print("Blynk: connected");
+          }
+          else{
+            lcd.setCursor(0,1);
+            lcd.print("Blynk: not connected");
+          }
+          if(statusWifi == 1 ){
+            lcd.setCursor(0,2);
+            lcd.print("Wifi: connected");
+          }
+          else{
+            lcd.setCursor(0,2);
+            lcd.print("Wifi: not connected");
+          }
+          if(statusWifi == 1){
+            lcd.setCursor(0,3);
+            lcd.print(String(WiFi.localIP()));
+          }   
+          break;
+        case 2:
+          lcd.clear();
+          lcd.setCursor(2,0);
+          lcd.print("Hello, world! 2");
+          // timer
+          // rtc
+          // ec set
+          // pH set
+          break;
+      }
+      /*lcd.clear();
+      lcd.setCursor(3,0);
+      lcd.print("Hello, world!");
+      lcd.setCursor(2,1);
+      lcd.print("Ywrobot Arduino!");
+      lcd.setCursor(0,2);
+      lcd.print("Arduino LCM IIC 2004");
+      lcd.setCursor(2,3);
+      lcd.print("Power By Ec-yuan!");*/
+    }
+};
+void RTCfunction(){
+  static unsigned long lastSaveTime = 0;
+  if (currentMillis - lastSaveTime >= 10000U) {
+    lastSaveTime = currentMillis;
+    DateTime now = RTC.now();
+    int day;
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    day = now.day();
+    Serial.print(' ');
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println();
+    //Serial.println(day);
+  }
+};

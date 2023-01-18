@@ -5,7 +5,7 @@
  * For example the Arduino MEGA 2560
 */
 
-PZEM004Tv30 pzem(Serial2, 16, 17);
+PZEM004Tv30 pzem(Serial2, 16, 17,0x07);
 
 void setup() {
     Serial.begin(115200);
