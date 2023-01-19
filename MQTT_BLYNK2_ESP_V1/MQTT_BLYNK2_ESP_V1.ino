@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <BlynkSimpleEsp32.h>
 #include <TimeLib.h>
+#include <EEPROM.h>
 
 #include <Wire.h>
 #include "DS3231.h"
@@ -16,6 +17,7 @@ PubSubClient mqtt(espClient);
 BlynkTimer timer;
 #define BLYNK_PRINT Serial
 
+#define EEPROM_SIZE 64
 const char* ssid = "ooy";
 const char* password = "0863447295";
 const char* mqtt_server = "broker.netpie.io";
@@ -32,11 +34,23 @@ const char* subscribe_topic = "@msg/temp";
 float t = 30.2,h = 100,ecValue = 1.5 ,lastPH = 7.5;
 unsigned long currentMillis = 0;
 
+int nowHour,nowMinute,nowSecond;       //RTC HH:MM:SS
+
+
+int startHour,startMinute,startSecond; //ON HH:MM:SS 
+int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
+
+float phLow,phHigh,ecLow,ecHigh;
+
 bool statusBlynk,statusMqtt,statusWifi;
+
+bool growLigh1,growLigh2,growLigh3,growLigh4;
+
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  initEEPROM();
   lcd.init();
   lcd.backlight();
   Wire.begin();//เริ่มการสื่อสารแบบ I2C
@@ -55,8 +69,9 @@ void loop() {
   Mqttreconnect();
   timer.run();
   reconnectBlynk();
-  //SerialstatusConnecting();
+  SerialstatusConnecting();
   functionLcd();
+  EEPROMfunction();
 
 }
 
@@ -107,11 +122,43 @@ void initWiFi() {
   lcd.clear();
   lcd.setCursor(3,0);
   lcd.print("WiFi Connected");
-  lcd.setCursor(0,1);
-  lcd.print(String(WiFi.localIP()));
+  //lcd.setCursor(0,1);
+  //lcd.print(String(WiFi.localIP()));
   Serial.println(WiFi.localIP());
   statusWifi = WiFi.status();
   delay(2000);
+
+};
+void initEEPROM() { 
+  if (!EEPROM.begin(EEPROM_SIZE))
+  {
+    Serial.println("failed to initialise EEPROM");
+  }
+  Serial.println(" bytes read from Flash . Values are:");
+  for (int i = 0; i < EEPROM_SIZE; i++)
+  {
+    Serial.print(byte(EEPROM.read(i))); Serial.print(" ");
+  }
+  /*for (int i = 0; i < EEPROM_SIZE; i++)
+  {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.commit();*/
+
+  startHour = EEPROM.read(0);
+  startMinute = EEPROM.read(1);
+  startSecond = EEPROM.read(2);
+  stopHour = EEPROM.read(3);
+  stoptMinute = EEPROM.read(4);
+  stopSecond = EEPROM.read(5);
+  EEPROM.get(6,phLow);
+  EEPROM.get(10,phHigh);
+  EEPROM.get(15,ecLow);
+  EEPROM.get(20,ecHigh);
+  /*int startHour,startMinute,startSecond; //ON HH:MM:SS 
+  int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS */
+  
+
 
 };
 
@@ -150,9 +197,10 @@ void reconnectBlynk(){
 }
 
 
-long timer_start_set[2] = {0xFFFF, 0xFFFF};
-long timer_stop_set[2] = {0xFFFF, 0xFFFF};
+long timer_start_set[1] = {0xFFFF};
+long timer_stop_set[1] = {0xFFFF};
 unsigned char weekday_set[2];
+
 BLYNK_WRITE(V0) 
 {
   unsigned char week_day;
@@ -164,15 +212,17 @@ BLYNK_WRITE(V0)
     timer_start_set[0] = (t.getStartHour() * 60 * 60) + (t.getStartMinute() * 60) + t.getStartSecond();
     timer_stop_set[0] = (t.getStopHour() * 60 * 60) + (t.getStopMinute() * 60) + t.getStopSecond();
     
-    Serial.println(String("Start Time: ") +
-                   t.getStartHour() + ":" +
-                   t.getStartMinute() + ":" +
-                   t.getStartSecond());
-                   
-    Serial.println(String("Stop Time: ") +
-                   t.getStopHour() + ":" +
-                   t.getStopMinute() + ":" +
-                   t.getStopSecond());
+    Serial.println(String("Start Time: ") +t.getStartHour() + ":" + t.getStartMinute() + ":" + t.getStartSecond());
+
+    startHour = t.getStartHour();
+    startMinute = t.getStartMinute();
+    startSecond = t.getStartSecond();
+
+    stopHour = t.getStopHour();
+    stoptMinute = t.getStopMinute();
+    stopSecond = t.getStopSecond();
+
+    Serial.println(String("Stop Time: ") + t.getStopHour() + ":" + t.getStopMinute() + ":" + t.getStopSecond());
                    
     for (int i = 1; i <= 7; i++) 
     {
@@ -189,6 +239,7 @@ BLYNK_WRITE(V0)
 
     weekday_set[0] = week_day;
   }
+
   else
   {
     timer_start_set[0] = 0xFFFF;
@@ -208,7 +259,23 @@ void SerialstatusConnecting(){
     Serial.print("\t");
     Serial.print("status of Mqtt :");
     Serial.println(statusMqtt);
+
+
+    Serial.print("ph low :");
+    Serial.print(phLow);
+    Serial.print("\t");
+    Serial.print("ph High :");
+    Serial.print(phHigh);
+    Serial.print("\t");
+    Serial.print("ec Low :");
+    Serial.print(ecLow);
+    Serial.print("\t");
+    Serial.print("ec High :");
+    Serial.println(ecHigh);
+
     //Blynk.sendInternal("rtc", "sync"); //request current local time for device
+    //Serial.println(String("Start Time: ") + startHour + ":" + startMinute + ":" + startSecond);
+    //Serial.println(String("Stop Time: ") + stopHour + ":" + stoptMinute + ":" + stopSecond);
   }
 };
 
@@ -263,15 +330,22 @@ void functionLcd(){
             lcd.setCursor(0,2);
             lcd.print("Wifi: not connected");
           }
-          if(statusWifi == 1){
+          /*if(statusWifi == 1){
             lcd.setCursor(0,3);
             lcd.print(String(WiFi.localIP()));
-          }   
+          }   */
           break;
         case 2:
           lcd.clear();
-          lcd.setCursor(2,0);
-          lcd.print("Hello, world! 2");
+          lcd.setCursor(0,0);
+          //int nowHour,nowMinute,nowSecond;
+          lcd.print(String("RTC:      ") + nowHour + ":" + nowMinute + ":" + nowSecond);
+          lcd.setCursor(0,1);
+          lcd.print(String("On Time:  ") + startHour + ":" + startMinute + ":" + startSecond);
+          lcd.setCursor(0,2);
+          lcd.print(String("Off Time: ") + stopHour + ":" + stoptMinute + ":" + stopSecond);
+
+          
           // timer
           // rtc
           // ec set
@@ -291,23 +365,54 @@ void functionLcd(){
 };
 void RTCfunction(){
   static unsigned long lastSaveTime = 0;
-  if (currentMillis - lastSaveTime >= 10000U) {
+  if (currentMillis - lastSaveTime >= 1000U) {
     lastSaveTime = currentMillis;
     DateTime now = RTC.now();
-    int day;
     Serial.print(now.year(), DEC);
     Serial.print('/');
     Serial.print(now.month(), DEC);
     Serial.print('/');
     Serial.print(now.day(), DEC);
-    day = now.day();
     Serial.print(' ');
-    Serial.print(now.hour(), DEC);
+    /*Serial.print(now.hour(), DEC);
     Serial.print(':');
     Serial.print(now.minute(), DEC);
     Serial.print(':');
-    Serial.print(now.second(), DEC);
+    Serial.print(now.second(), DEC);*/
     Serial.println();
+    nowHour=now.hour();
+    nowMinute=now.minute();
+    nowSecond=now.second();
+
+
     //Serial.println(day);
+  }
+};
+
+void EEPROMfunction(){
+  static unsigned long lastSaveTime = 0;
+  if (currentMillis - lastSaveTime >= 10000U) {
+    lastSaveTime = currentMillis;
+    float phLow1 = 5.5;
+    float phHigh1 = 5.9;
+    float ecLow1 = 1.2;
+    float ecHigh1 = 1.5;
+
+    EEPROM.write(0, startHour);
+    EEPROM.write(1, startMinute); //startMinute = byte(startMinute); optional
+    EEPROM.write(2, startSecond);
+    EEPROM.write(3, stopHour);
+    EEPROM.write(4, stoptMinute);
+    EEPROM.write(5, stopSecond);
+    EEPROM.put(6, phLow1);
+    EEPROM.put(10, phHigh1);
+    EEPROM.put(15, ecLow1);
+    EEPROM.put(20, ecHigh1);
+    EEPROM.commit();
+    Serial.println("EEPROM Done");
+
+
+    //int startHour,startMinute,startSecond; //ON HH:MM:SS 
+    //int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
   }
 };

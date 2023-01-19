@@ -3,12 +3,10 @@
 #include "tds.h"
 #include "DHT.h"
 #include "pin.h"
-#include "flow.h"
 #include "SerialCommand.h"
 #include "Input_pullup.h"
 #define DHTTYPE DHT22
 TDS tds(ECPIN);
-FLOW flowA(FLOW_P,7.5);
 WiFiClient client;
 PubSubClient mqtt(client);
 DHT dht(DHTPIN, DHTTYPE);
@@ -36,15 +34,12 @@ float lastPH = 0;
 //--------------------------------
 float ecValue,TdsValue,lastEC;
 
-void IRAM_ATTR pulseCounterFlowA(){
-  flowA.pulseCounter();
-}
+
 
 void setup() {
   Serial.begin(115200);
   Serial2.begin(9600, SERIAL_8N1, RX2, TX2);
   closeRTU();
-  attachInterrupt(digitalPinToInterrupt(flowA.t_pin), pulseCounterFlowA, FALLING);
   initWiFi(); // function connect WiFi
   mqtt.setServer(mqtt_server, mqtt_port);
   dht.begin();
@@ -53,20 +48,14 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
-  flow();
   readDHT();
   PH();
   Ec();
   Mqttreconnect();
-  saveLedStates(); // save the state of the ---- to non-volatile memory every 10 seconds
+   // save the state of the ---- to non-volatile memory every 10 seconds
   
 }
-void flow(){
-  if (currentMillis - TIME_FLOW > interval) { // currentMillis - TIME_FLOW > interval
-    flowA.readFlowrate(currentMillis);
-    TIME_FLOW = currentMillis;
-  }
-}
+
 void Ec(){
   static int sum = 0; // variable to store the sum of the readings
   static int count = 0; // variable to store the number of readings
@@ -165,26 +154,4 @@ void PH(){
   }
 };
 
-void saveLedStates() {
-  static unsigned long lastSaveTime = 0;
-  if (currentMillis - lastSaveTime > 10000U) {
-    lastSaveTime = currentMillis;
-    Serial.println("saveLedStates working");
-    /*
-    // read the current states of the LEDs
-    int led1State = digitalRead(LED1_PIN);
-    int led2State = digitalRead(LED2_PIN);
-    int led3State = digitalRead(LED3_PIN);
-    int led4State = digitalRead(LED4_PIN);
-  
-    // write the LED states to non-volatile memory
-    EEPROM.write(LED1_STATE_ADDRESS, led1State);
-    EEPROM.write(LED2_STATE_ADDRESS, led2State);
-    EEPROM.write(LED3_STATE_ADDRESS, led3State);
-    EEPROM.write(LED4_STATE_ADDRESS, led4State);
-  
-    // commit the data to non-volatile memory
-    EEPROM.commit();
-    */
-  }
-};
+

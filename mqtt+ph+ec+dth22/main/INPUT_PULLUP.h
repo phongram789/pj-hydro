@@ -5,7 +5,7 @@ class InputPullup{
     int t_pin;
 
   public:
-    swInput(int pin){
+    void swInput(int pin){
       t_pin = pin;
       pinMode(t_pin,INPUT_PULLUP);
     }
