@@ -31,6 +31,7 @@ float acidVoltage = 1810;
 float neutralVoltage = 1370;
 const int smoothFactor = 10;
 float lastPH = 0;
+
 //--------------------------------
 float ecValue,TdsValue,lastEC;
 
