@@ -4,13 +4,16 @@
 #include <BlynkSimpleEsp32.h>
 #include <TimeLib.h>
 #include <EEPROM.h>
-
+#include <PZEM004Tv30.h>
 #include <Wire.h>
 #include "DS3231.h"
 #include <LiquidCrystal_I2C.h>
-
+#include "rtu.h"
+#include "INPUT_PULLUP.h"
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 RTClib RTC;
+
+PZEM004Tv30 pzem(Serial2, 16, 17,0x07);
 
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
@@ -49,6 +52,15 @@ float phLow,phHigh,ecLow,ecHigh;
 
 bool statusBlynk,statusMqtt,statusWifi;
 
+float voltage ,current ,power ,energy , frequency, pf;
+
+bool ecAuto, ecMan;
+
+#define pinSwitchEcAuto 5
+#define pinSwitchEcMan 18
+
+swInput swAutoEC(pinSwitchEcAuto);
+swInput swManEC(pinSwitchEcMan);
 
 void setup() {
   // put your setup code here, to run once:
@@ -75,14 +87,34 @@ void loop() {
   SerialstatusConnecting();
   functionLcd();
   EEPROMfunction();
+  pzemRead();
+  ontestRelay();
+  //offtestRelay();
+
+
 
 }
 
 void sendSensor(){
+  //float voltage ,current ,power ,energy , frequency, pf;
   float h = random(0,30);
   float t = random(0,100);
   Blynk.virtualWrite(V3, h);
   Blynk.virtualWrite(V4, t);
+  Blynk.virtualWrite(V5, voltage);
+  Blynk.virtualWrite(V6, current);
+  Blynk.virtualWrite(V7, power);
+  Blynk.virtualWrite(V8, energy);
+  Blynk.virtualWrite(V9, frequency);
+  Blynk.virtualWrite(V15, pf);
+  ecAuto = swAutoEC.get_status();
+  ecMan = swManEC.get_status();
+  Serial.print("ecAuto :");
+  Serial.println(ecAuto);
+  Serial.print("ecMan :");
+  Serial.println(ecMan);
+
+
 }
 
 void Mqttreconnect(){
@@ -219,6 +251,7 @@ void callback(char* topic,byte* payload, unsigned int length) {
     //Serial.println(msg);
   }
 };
+
 
 void reconnectBlynk(){
   static unsigned long timepoint = 0;
@@ -394,6 +427,52 @@ void functionLcd(){
       }
     }
 };
+void pzemRead(){
+  static unsigned long lastSaveTime = 0;
+    if (currentMillis - lastSaveTime >= 2000U) {
+      lastSaveTime = currentMillis;
+      for(int i = 1 ; i <= 2 ; i++){
+        Serial.print("Custom Address:");
+        Serial.println(pzem.readAddress(), HEX);
+
+        // Read the data from the sensor
+         voltage = pzem.voltage();
+         current = pzem.current();
+         power = pzem.power();
+         energy = pzem.energy();
+         frequency = pzem.frequency();
+         pf = pzem.pf();
+
+        // Check if the data is valid
+        if(isnan(voltage)){
+            Serial.println("Error reading voltage");
+        } else if (isnan(current)) {
+            Serial.println("Error reading current");
+        } else if (isnan(power)) {
+            Serial.println("Error reading power");
+        } else if (isnan(energy)) {
+            Serial.println("Error reading energy");
+        } else if (isnan(frequency)) {
+            Serial.println("Error reading frequency");
+        } else if (isnan(pf)) {
+            Serial.println("Error reading power factor");
+        } else {
+
+            // Print the values to the Serial console
+            /*Serial.print("Voltage: ");      Serial.print(voltage);      Serial.println("V");
+            Serial.print("Current: ");      Serial.print(current);      Serial.println("A");
+            Serial.print("Power: ");        Serial.print(power);        Serial.println("W");
+            Serial.print("Energy: ");       Serial.print(energy,3);     Serial.println("kWh");
+            Serial.print("Frequency: ");    Serial.print(frequency, 1); Serial.println("Hz");
+            Serial.print("PF: ");           Serial.println(pf);*/
+
+        }
+        //Serial.println();
+        delay(100);
+      }
+    }
+}
+
 void RTCfunction(){
   static unsigned long lastSaveTime = 0;
   if (currentMillis - lastSaveTime >= 1000U) {
@@ -445,3 +524,39 @@ void EEPROMfunction(){
   }
 };
 
+void ontestRelay(){
+  static unsigned long lastSaveTime = 0;
+  if (currentMillis - lastSaveTime >= 3000U) {
+    lastSaveTime = currentMillis;
+
+    Serial.println("-----------on------------");
+    Serial2.write(ON_RTU1, 8);
+  }
+ 
+
+}
+void offtestRelay(){
+  static unsigned long lastSaveTime = 0;
+  if (currentMillis - lastSaveTime >= 2000U) {
+    lastSaveTime = currentMillis;
+
+    Serial.println("---------off-----------");
+    Serial2.write(OFF_RTU1, 8);
+  }
+
+}
+void controlEC(){
+
+}
+void controlPH(){
+  
+}
+void controlGrowLight(){
+  
+}
+void controlWaterPump(){
+  
+}
+void controlWaterLevel(){
+  
+}

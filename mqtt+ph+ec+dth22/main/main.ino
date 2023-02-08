@@ -25,6 +25,7 @@ unsigned long TIME_FLOW = 0;
 const long interval = 1000;
 
 float h,t; //humidity and temperature
+
 //-------------pH-----------------
 float voltagePH,phValue;
 float acidVoltage = 1810;
