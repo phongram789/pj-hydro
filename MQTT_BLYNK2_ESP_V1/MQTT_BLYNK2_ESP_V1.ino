@@ -56,6 +56,8 @@ float voltage ,current ,power ,energy , frequency, pf;
 
 bool ecAuto, ecMan;
 
+bool swEcModeOff,swEcModeMan,swEcModeAuto;
+
 #define pinSwitchEcAuto 5
 #define pinSwitchEcMan 18
 
@@ -88,10 +90,8 @@ void loop() {
   functionLcd();
   EEPROMfunction();
   pzemRead();
-  ontestRelay();
-  //offtestRelay();
-
-
+  //ontestRelay();
+  controlEC();
 
 }
 
@@ -107,14 +107,7 @@ void sendSensor(){
   Blynk.virtualWrite(V8, energy);
   Blynk.virtualWrite(V9, frequency);
   Blynk.virtualWrite(V15, pf);
-  ecAuto = swAutoEC.get_status();
-  ecMan = swManEC.get_status();
-  Serial.print("ecAuto :");
-  Serial.println(ecAuto);
-  Serial.print("ecMan :");
-  Serial.println(ecMan);
-
-
+  
 }
 
 void Mqttreconnect(){
@@ -324,7 +317,7 @@ void SerialstatusConnecting(){
   static unsigned long timepoint = 0;
   if(currentMillis - timepoint >= 10000U){
     timepoint = currentMillis;
-    Serial.print("status of WiFi :");
+    /*Serial.print("status of WiFi :");
     Serial.print(statusWifi);
     Serial.print("\t");
     Serial.print("status of Blynk :");
@@ -344,7 +337,7 @@ void SerialstatusConnecting(){
     Serial.print(ecLow);
     Serial.print("\t");
     Serial.print("ec High :");
-    Serial.println(ecHigh);
+    Serial.println(ecHigh);*/
 
     //Blynk.sendInternal("rtc", "sync"); //request current local time for device
     //Serial.println(String("Start Time: ") + startHour + ":" + startMinute + ":" + startSecond);
@@ -432,8 +425,8 @@ void pzemRead(){
     if (currentMillis - lastSaveTime >= 2000U) {
       lastSaveTime = currentMillis;
       for(int i = 1 ; i <= 2 ; i++){
-        Serial.print("Custom Address:");
-        Serial.println(pzem.readAddress(), HEX);
+        //Serial.print("Custom Address:");
+        //Serial.println(pzem.readAddress(), HEX);
 
         // Read the data from the sensor
          voltage = pzem.voltage();
@@ -445,7 +438,7 @@ void pzemRead(){
 
         // Check if the data is valid
         if(isnan(voltage)){
-            Serial.println("Error reading voltage");
+          //Serial.println("Error reading voltage");
         } else if (isnan(current)) {
             Serial.println("Error reading current");
         } else if (isnan(power)) {
@@ -532,31 +525,98 @@ void ontestRelay(){
     Serial.println("-----------on------------");
     Serial2.write(ON_RTU1, 8);
   }
- 
-
 }
-void offtestRelay(){
-  static unsigned long lastSaveTime = 0;
-  if (currentMillis - lastSaveTime >= 2000U) {
-    lastSaveTime = currentMillis;
 
-    Serial.println("---------off-----------");
-    Serial2.write(OFF_RTU1, 8);
+void controlEC(){ //switch mode --> codition of lv EC value --> Return state of relay
+  static unsigned long lastSaveTime;
+  static bool relayState ;
+  const int relayOnTime = 5000;     // Relay on time in milliseconds
+  const int relayOffTime = 60000;   // Relay off time in milliseconds
+
+
+  ecAuto = swAutoEC.get_status();
+  ecMan = swManEC.get_status();
+  /*
+  Serial.print("ecAuto :");Serial.println(ecAuto);
+  Serial.print("ecMan :");Serial.println(ecMan);
+  */
+  bool controlPumpEc;
+
+  if(ecValue < ecLow){ // pump AB solution to up ec value in water
+    controlPumpEc = 1;
+  }
+  else if((ecValue >= ecLow)&&(ecValue <= ecHigh)){ // good Ec Value
+    controlPumpEc = 0;
+  }
+  else{ // high ec value in water
+    controlPumpEc = 0;
   }
 
-}
-void controlEC(){
+
+  
+  if((ecAuto == 1)&&(ecMan == 1)){ // swEcModeOff
+    // Rtu relay off case 0
+    relayState = LOW;
+    Serial.println("sw off");    
+  }
+  else if ((ecAuto == 0)&&(ecMan == 1)){ //swEcModeAuto
+    if(controlPumpEc = 1){
+      if (currentMillis - lastSaveTime >= (relayState == HIGH ? relayOnTime : relayOffTime)) {
+        // Toggle the state of the relay
+        relayState = !relayState;
+        Serial.println(relayState);
+        // Store the current time
+        lastSaveTime = currentMillis;
+      }
+    }
+    else{
+      // Relay RTU Off
+      relayState = LOW;
+      Serial.println("relayOffTime with good ec value");
+    }
+  }
+  else if ((ecAuto == 1)&&(ecMan == 0)){ //swEcModeMan
+    // Rtu relay on
+    Serial.println("sw man on");
+    relayState = HIGH;
+
+  }
+  else{
+    // serial error
+    // Rtu relay off
+    Serial.println("sw error");
+  }
+
+
 
 }
-void controlPH(){
+void controlPH(){ //switch mode --> codition of lv pH value --> Return state of relay 
+  // bool stateofph 
+  //relay(0)
   
 }
-void controlGrowLight(){
+void controlGrowLight(){ //switch mode --> timer --> Return state of relay
   
 }
-void controlWaterPump(){
+void controlWaterPump(){ //switch mode --> Return state of relay
   
 }
-void controlWaterLevel(){
+void controlWaterLevel(){ //switch mode --> lv of water in tank --> Return state of relay
   
+}
+void relay(int condition){ // manage state of relay on/off ch.
+  switch(condition) {
+    case 0:
+      //sending conmand relay off ec ch
+      //relay 50-100
+      //Serial2.write(ON_RTU1, 8);
+      break;
+    case 1:
+      //sending conmand relay on ec ch
+      //relay 50-100
+      //Serial2.write(OFF_RTU1, 8);
+      break;
+  }
+
+
 }
