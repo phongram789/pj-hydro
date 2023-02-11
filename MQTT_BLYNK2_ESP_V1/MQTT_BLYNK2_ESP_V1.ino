@@ -36,7 +36,7 @@ const char* mqtt_password = "n6htDnjn7rLq8_epUM)N-M076iMWy4t4";
 char auth[] = BLYNK_AUTH_TOKEN;
 
 const char* subscribe_topic = "@msg/temp";
-float t = 30.2,h = 100,ecValue = 1.5 ,lastPH = 7.5;
+float t = 30.2,h = 100,ecValue = 1.3 ,phValue = 7.5;
 unsigned long currentMillis = 0;
 
 int nowHour,nowMinute,nowSecond;       //RTC HH:MM:SS
@@ -47,6 +47,7 @@ int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
 bool growLigh1,growLigh2,growLigh3,growLigh4;
 
 
+bool controlPumpEc,controlPumpPH; //void Control ec
 
 float phLow,phHigh,ecLow,ecHigh;
 
@@ -54,15 +55,20 @@ bool statusBlynk,statusMqtt,statusWifi;
 
 float voltage ,current ,power ,energy , frequency, pf;
 
-bool ecAuto, ecMan;
+bool ecAuto, ecMan, phAuto, phMan;
 
 bool swEcModeOff,swEcModeMan,swEcModeAuto;
 
 #define pinSwitchEcAuto 5
 #define pinSwitchEcMan 18
 
+#define pinSwitchPHAuto 4
+#define pinSwitchPHMan 0
+
 swInput swAutoEC(pinSwitchEcAuto);
 swInput swManEC(pinSwitchEcMan);
+swInput swAutoPH(pinSwitchPHAuto);
+swInput swManPH(pinSwitchPHMan);
 
 void setup() {
   // put your setup code here, to run once:
@@ -92,6 +98,7 @@ void loop() {
   pzemRead();
   //ontestRelay();
   controlEC();
+  controlPH();
 
 }
 
@@ -137,7 +144,7 @@ void Mqttreconnect(){
     else {
       mqtt.loop();
       
-      String dataJS = "{\"temp\":" + String(t) + ",\"hum\":" + String(h) + ",\"ec\":" + String(ecValue) + ",\"ph\":" + String(lastPH) + ",\"onhh\":" + String(startHour) + ",\"onmm\":" + String(startMinute) + ",\"onss\":" + String(startSecond) + "}";
+      String dataJS = "{\"temp\":" + String(t) + ",\"hum\":" + String(h) + ",\"ec\":" + String(ecValue) + ",\"ph\":" + String(phValue) + ",\"onhh\":" + String(startHour) + ",\"onmm\":" + String(startMinute) + ",\"onss\":" + String(startSecond) + "}";
       char json[150];
       dataJS.toCharArray(json,dataJS.length()+1);
       mqtt.publish("@msg/v1/devices/me/telemetry", json);
@@ -368,7 +375,7 @@ void functionLcd(){
           lcd.setCursor(0,2);
           lcd.print("EC    :" + String(ecValue) + " mS/cm");
           lcd.setCursor(0,3);
-          lcd.print("pH    :" + String(lastPH));
+          lcd.print("pH    :" + String(phValue));
           break;
         case 1:
           lcd.clear();
@@ -509,7 +516,7 @@ void EEPROMfunction(){
     EEPROM.put(15, ecLow);
     EEPROM.put(20, ecHigh);
     EEPROM.commit();
-    Serial.println("EEPROM Done");
+    //Serial.println("EEPROM Done");
 
 
     //int startHour,startMinute,startSecond; //ON HH:MM:SS 
@@ -528,8 +535,10 @@ void ontestRelay(){
 }
 
 void controlEC(){ //switch mode --> codition of lv EC value --> Return state of relay
-  static unsigned long lastSaveTime;
-  static bool relayState ;
+  static unsigned long lastSaveTimeAuto;
+  static unsigned long lastSaveTimeMan;
+  static unsigned long lastSaveTimeoOff;
+  static bool relayState;
   const int relayOnTime = 5000;     // Relay on time in milliseconds
   const int relayOffTime = 60000;   // Relay off time in milliseconds
 
@@ -540,8 +549,8 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
   Serial.print("ecAuto :");Serial.println(ecAuto);
   Serial.print("ecMan :");Serial.println(ecMan);
   */
-  bool controlPumpEc;
-
+  
+  
   if(ecValue < ecLow){ // pump AB solution to up ec value in water
     controlPumpEc = 1;
   }
@@ -552,34 +561,67 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
     controlPumpEc = 0;
   }
 
-
-  
+  // Select switch
   if((ecAuto == 1)&&(ecMan == 1)){ // swEcModeOff
     // Rtu relay off case 0
-    relayState = LOW;
-    Serial.println("sw off");    
+    if(relayState != LOW){
+      Serial.print("relayState mode off: ");
+      Serial.println(relayState);
+      relayRtu(2);
+      relayState = LOW;
+    }
+    
+    if (currentMillis - lastSaveTimeoOff >= 60000U) {
+      Serial.print("relayState mode off: ");
+      Serial.println(relayState);
+      relayRtu(2);
+      relayState = LOW;
+      lastSaveTimeoOff = currentMillis;
+      //Serial.println("sw man on");
+    }    
   }
   else if ((ecAuto == 0)&&(ecMan == 1)){ //swEcModeAuto
-    if(controlPumpEc = 1){
-      if (currentMillis - lastSaveTime >= (relayState == HIGH ? relayOnTime : relayOffTime)) {
+    if(controlPumpEc == 1){
+      if (currentMillis - lastSaveTimeAuto >= (relayState == HIGH ? relayOnTime : relayOffTime)) {
         // Toggle the state of the relay
         relayState = !relayState;
-        Serial.println(relayState);
+        if(relayState == HIGH){
+          Serial.print("relayState: ");
+          Serial.println(relayState);  
+          relayRtu(1);          
+        }
+        else{
+          Serial.print("relayState else: ");
+          Serial.println(relayState);
+          relayRtu(2);
+        }
         // Store the current time
-        lastSaveTime = currentMillis;
+        lastSaveTimeAuto = currentMillis;
       }
     }
     else{
       // Relay RTU Off
       relayState = LOW;
-      Serial.println("relayOffTime with good ec value");
+      //Serial.println("relayOffTime with good ec value");
     }
   }
   else if ((ecAuto == 1)&&(ecMan == 0)){ //swEcModeMan
     // Rtu relay on
-    Serial.println("sw man on");
-    relayState = HIGH;
-
+    if(relayState != HIGH){
+      Serial.print("relayState mode MAN: ");
+      Serial.println(relayState);
+      relayRtu(1);
+      relayState = HIGH;
+    }
+    
+    if (currentMillis - lastSaveTimeMan >= 60000U) {
+      relayState = HIGH;
+      Serial.print("relayState mode MAN: ");
+      Serial.println(relayState);
+      relayRtu(1);
+      lastSaveTimeMan = currentMillis;
+      //Serial.println("sw man on");
+    }
   }
   else{
     // serial error
@@ -591,8 +633,100 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
 
 }
 void controlPH(){ //switch mode --> codition of lv pH value --> Return state of relay 
-  // bool stateofph 
-  //relay(0)
+  static unsigned long lastSaveTimeAuto;
+  static unsigned long lastSaveTimeMan;
+  static unsigned long lastSaveTimeoOff;
+  static bool relayStatePH;
+  const int relayOnTime = 5000;     // Relay on time in milliseconds
+  const int relayOffTime = 60000;   // Relay off time in milliseconds
+
+  phAuto = swAutoPH.get_status();
+  phMan = swManPH.get_status();
+  
+  /*Serial.print("phAuto :");Serial.println(phAuto);
+  Serial.print("phMan :");Serial.println(phMan);*/
+  
+  
+  
+  if((phValue > phHigh)&&(controlPumpEc != 1)){ // pump pH solution to up pH value in water
+    controlPumpPH = 1;
+  }
+  else if((phValue >= phLow)&&(phValue <= phHigh)){ // good pH Value
+    controlPumpPH = 0;
+  }
+  else{ // low pH value in water
+    controlPumpPH = 0;
+  }
+
+  // Select switch
+  if((phAuto == 1)&&(phMan == 1)){ // swphModeOff
+    // Rtu relay off case 0
+    if(relayStatePH != LOW){
+      Serial.print("relayState ph mode off: ");
+      Serial.println(relayStatePH);
+      relayRtu(4);
+      relayStatePH = LOW;
+    }
+    
+    if (currentMillis - lastSaveTimeoOff >= 60000U) {
+      Serial.print("relayState ph mode off: ");
+      Serial.println(relayStatePH);
+      relayRtu(4);
+      relayStatePH = LOW;
+      lastSaveTimeoOff = currentMillis;
+      //Serial.println("sw man on");
+    }    
+  }
+  else if ((phAuto == 0)&&(phMan == 1)){ //swphModeAuto
+    if(controlPumpPH == 1){
+      if (currentMillis - lastSaveTimeAuto >= (relayStatePH == HIGH ? relayOnTime : relayOffTime)) {
+        // Toggle the state of the relay
+        relayStatePH = !relayStatePH;
+        if(relayStatePH == HIGH){
+          Serial.print("relayState ph: ");
+          Serial.println(relayStatePH);  
+          relayRtu(3);          
+        }
+        else{
+          Serial.print("relayState ph else: ");
+          Serial.println(relayStatePH);
+          relayRtu(4);
+        }
+        // Store the current time
+        lastSaveTimeAuto = currentMillis;
+      }
+    }
+    else{
+      // Relay RTU Off 
+      relayStatePH = LOW;
+      //Serial.println("relayOffTime with good ph value");
+    }
+  }
+  else if ((phAuto == 1)&&(phMan == 0)){ //swphModeMan
+    // Rtu relay on
+    if(relayStatePH != HIGH){
+      Serial.print("relayState mode MAN: ");
+      Serial.println(relayStatePH);
+      relayRtu(3);
+      relayStatePH = HIGH;
+    }
+    
+    if (currentMillis - lastSaveTimeMan >= 60000U) {
+      relayStatePH = HIGH;
+      Serial.print("relayState mode MAN: ");
+      Serial.println(relayStatePH);
+      relayRtu(3);
+      lastSaveTimeMan = currentMillis;
+      //Serial.println("sw man on");
+    }
+  }
+  else{
+    // serial error
+    // Rtu relay off
+    Serial.println("sw error");
+  }
+
+  
   
 }
 void controlGrowLight(){ //switch mode --> timer --> Return state of relay
@@ -604,19 +738,31 @@ void controlWaterPump(){ //switch mode --> Return state of relay
 void controlWaterLevel(){ //switch mode --> lv of water in tank --> Return state of relay
   
 }
-void relay(int condition){ // manage state of relay on/off ch.
+void relayRtu(int condition){ // manage state of relay on/off ch.
   switch(condition) {
-    case 0:
-      //sending conmand relay off ec ch
-      //relay 50-100
-      //Serial2.write(ON_RTU1, 8);
-      break;
     case 1:
       //sending conmand relay on ec ch
       //relay 50-100
-      //Serial2.write(OFF_RTU1, 8);
+      Serial2.write(ON_RTU1, 8);
+      delay(50);
+      break;
+    case 2:
+      //sending conmand relay off ec ch
+      //relay 50-100
+      Serial2.write(OFF_RTU1, 8);
+      delay(50);
+      break;
+    case 3:
+      //sending conmand relay on ph ch
+      //relay 50-100
+      Serial2.write(ON_RTU2, 8);
+      delay(50);
+      break;
+    case 4:
+      //sending conmand relay off ph ch
+      //relay 50-100
+      Serial2.write(OFF_RTU2, 8);
+      delay(50);
       break;
   }
-
-
 }
