@@ -39,25 +39,32 @@ const char* subscribe_topic = "@msg/temp";
 float t = 30.2,h = 100,ecValue = 1.3 ,phValue = 7.5;
 unsigned long currentMillis = 0;
 
+
+
+bool Rtcmodule; // 0 = error, 1 = good 
 int nowHour,nowMinute,nowSecond;       //RTC HH:MM:SS
-
-
 int startHour,startMinute,startSecond; //ON HH:MM:SS 
 int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
-bool growLigh1,growLigh2,growLigh3,growLigh4;
 
+bool growLigh1,growLigh2,growLigh3,growLigh4; //status on working of grow light
 
-bool controlPumpEc,controlPumpPH; //void Control ec
+bool mainWaterPump; //status on working of water pump to line plant zone
 
-float phLow,phHigh,ecLow,ecHigh;
+bool timeonGL; //0 == off , 1 == on //value of on/off in time clock
 
-bool statusBlynk,statusMqtt,statusWifi;
+bool controlPumpEc,controlPumpPH; //void Control 
 
-float voltage ,current ,power ,energy , frequency, pf;
+float phLow,phHigh,ecLow,ecHigh; // first read input from eeprom and then already read from blynk n mqtt and then save in eeprom
 
-bool ecAuto, ecMan, phAuto, phMan;
+bool statusBlynk,statusMqtt,statusWifi; 
 
-bool swEcModeOff,swEcModeMan,swEcModeAuto;
+float voltage ,current ,power ,energy , frequency, pf; // values from energy module
+
+bool ecAuto, ecMan, phAuto, phMan ,GLAuto ,GLMan; //switch mode 
+
+bool swEcModeOff,swEcModeMan,swEcModeAuto;  //switch mode
+
+bool GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; // read input from blynk and mtqq 0 = off, 1 = on --> save eefrom repeate
 
 #define pinSwitchEcAuto 5
 #define pinSwitchEcMan 18
@@ -65,10 +72,18 @@ bool swEcModeOff,swEcModeMan,swEcModeAuto;
 #define pinSwitchPHAuto 4
 #define pinSwitchPHMan 0
 
+#define pinSwitchGrowlightAuto 19
+#define pinSwitchGrowlightMan 23
+
+const int buttonPinMainWaterPump = 15;
+int buttonState = HIGH;
+
 swInput swAutoEC(pinSwitchEcAuto);
 swInput swManEC(pinSwitchEcMan);
 swInput swAutoPH(pinSwitchPHAuto);
 swInput swManPH(pinSwitchPHMan);
+swInput swAutoGL(pinSwitchGrowlightAuto);
+swInput swManGL(pinSwitchGrowlightMan);
 
 void setup() {
   // put your setup code here, to run once:
@@ -82,6 +97,8 @@ void setup() {
   mqtt.setCallback(callback);
   Blynk.config(auth,"blynk.cloud", 8080);
   timer.setInterval(2000L, sendSensor);
+
+  pinMode(buttonPin, INPUT);//
   delay(500);
 }
 
@@ -96,9 +113,9 @@ void loop() {
   functionLcd();
   EEPROMfunction();
   pzemRead();
-  //ontestRelay();
   controlEC();
   controlPH();
+  controlGrowLight();
 
 }
 
@@ -114,7 +131,21 @@ void sendSensor(){
   Blynk.virtualWrite(V8, energy);
   Blynk.virtualWrite(V9, frequency);
   Blynk.virtualWrite(V15, pf);
-  
+
+  Serial.print("relayState growLigh1 mode off: ");
+  Serial.println(growLigh1);
+  Serial.print("relayState growLigh2 mode off: ");
+  Serial.println(growLigh2);
+  Serial.print("relayState growLigh3 mode off: ");
+  Serial.println(growLigh3);
+  Serial.print("relayState growLigh4 mode off: ");
+  Serial.println(growLigh4);
+
+
+  Serial.print("relayState GLMan: ");
+  Serial.println(GLMan);
+  Serial.print("relayState GLAuto: ");
+  Serial.println(GLAuto);
 }
 
 void Mqttreconnect(){
@@ -126,10 +157,20 @@ void Mqttreconnect(){
       Serial.print("MQTT connection... ");
       if (mqtt.connect(mqtt_client, mqtt_username, mqtt_password)){
         mqtt.subscribe(subscribe_topic);// DONT FORGET subscribe_topic = "@msg/temp"
-        mqtt.subscribe("@msg/eclow");
+        //------------------range of ec ph values---
+        mqtt.subscribe("@msg/eclow"); 
         mqtt.subscribe("@msg/echigh");
         mqtt.subscribe("@msg/phlow");
         mqtt.subscribe("@msg/phhigh");
+        //------------------get values to control growlight ---
+        mqtt.subscribe("@msg/kmutnb/cs/smarthydroponic1/gl1"); 
+        mqtt.subscribe("@msg/kmutnb/cs/smarthydroponic1/gl2");
+        mqtt.subscribe("@msg/kmutnb/cs/smarthydroponic1/gl3");
+        mqtt.subscribe("@msg/kmutnb/cs/smarthydroponic1/gl4");
+        //------------------get values to control main water pump ---
+        mqtt.subscribe("@msg/kmutnb/cs/smarthydroponic1/mainwater");
+
+        
 
 
         Serial.println("connected");
@@ -148,6 +189,12 @@ void Mqttreconnect(){
       char json[150];
       dataJS.toCharArray(json,dataJS.length()+1);
       mqtt.publish("@msg/v1/devices/me/telemetry", json);
+
+      //idea name of topics @msg/kmutnb/cs/smarthydroponic1/power
+      //idea name of topics @msg/kmutnb/cs/smarthydroponic1/status
+      //bool growLigh1,growLigh2,growLigh3,growLigh4;
+
+      // status of growlight , all pump , power meter , 
 
       // startHour,startMinute,startSecond; //ON HH:MM:SS 
       /*String date = String(startHour);
@@ -195,6 +242,9 @@ void initEEPROM() {
     EEPROM.write(i, 0);
   }
   EEPROM.commit();*/
+
+  //work list hear
+  //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
 
   startHour = EEPROM.read(0);
   startMinute = EEPROM.read(1);
@@ -249,6 +299,48 @@ void callback(char* topic,byte* payload, unsigned int length) {
     phHigh = msg.toFloat();
     //Serial.print("phhigh");
     //Serial.println(msg);
+  }
+  
+  //-------------------------- control growlight-----------------
+  //GrowLight1Control1, GrowLight1Control2, GrowLight1Control3, GrowLight1Control4
+  if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl1") { 
+    if (msg == "1"){
+      GrowLight1Control1 = 1;
+    } else {
+      GrowLight1Control1 = 0;
+    }
+    
+  }
+  if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl2") { 
+    if (msg == "1"){
+      GrowLight1Control2 = 1;
+    } else {
+      GrowLight1Control2 = 0;
+    }
+  }
+  if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl3") { 
+    if (msg == "1"){
+      GrowLight1Control3 = 1;
+    } else {
+      GrowLight1Control3 = 0;
+    }
+    
+  }
+  if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl4") { 
+    if (msg == "1"){
+      GrowLight1Control4 = 1;
+    } else {
+      GrowLight1Control4 = 0;
+    }
+  }
+  
+  //-------------------------main water pump pumping to line plant
+  if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/mainwater") { 
+    if (msg == "1"){
+      mainWaterPump = 1;
+    } else {
+      mainWaterPump = 0;
+    }
   }
 };
 
@@ -475,6 +567,7 @@ void pzemRead(){
 
 void RTCfunction(){
   static unsigned long lastSaveTime = 0;
+  static unsigned long lastSaveTimeError;
   if (currentMillis - lastSaveTime >= 1000U) {
     lastSaveTime = currentMillis;
     DateTime now = RTC.now();
@@ -490,6 +583,17 @@ void RTCfunction(){
     Serial.print(':');
     Serial.print(now.second(), DEC);
     Serial.println();*/
+    if(now.year() < 2023){
+      Rtcmodule = 0;
+      if (currentMillis - lastSaveTimeError >= 10000U) {
+        Serial.println("RTC ERROR");
+        requestTime();
+        lastSaveTimeError = currentMillis;
+      }
+    }
+    else{
+      Rtcmodule = 1;
+    }
     nowHour=now.hour();
     nowMinute=now.minute();
     nowSecond=now.second();
@@ -500,10 +604,10 @@ void EEPROMfunction(){
   static unsigned long lastSaveTime = 0;
   if (currentMillis - lastSaveTime >= 10000U) {
     lastSaveTime = currentMillis;
-    /*float phLow;
-    float phHigh;
-    float ecLow;
-    float ecHigh;*/
+
+
+    //work list hear
+    //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
 
     EEPROM.write(0, startHour);
     EEPROM.write(1, startMinute); //startMinute = byte(startMinute); optional
@@ -518,21 +622,11 @@ void EEPROMfunction(){
     EEPROM.commit();
     //Serial.println("EEPROM Done");
 
-
-    //int startHour,startMinute,startSecond; //ON HH:MM:SS 
-    //int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
+    //work list is done
+    //startHour,startMinute,startSecond ON HH:MM:SS 
+    //stopHour,stoptMinute,stopSecond   OFF HH:MM:SS
   }
 };
-
-void ontestRelay(){
-  static unsigned long lastSaveTime = 0;
-  if (currentMillis - lastSaveTime >= 3000U) {
-    lastSaveTime = currentMillis;
-
-    Serial.println("-----------on------------");
-    Serial2.write(ON_RTU1, 8);
-  }
-}
 
 void controlEC(){ //switch mode --> codition of lv EC value --> Return state of relay
   static unsigned long lastSaveTimeAuto;
@@ -550,7 +644,7 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
   Serial.print("ecMan :");Serial.println(ecMan);
   */
   
-  
+  //-------------------- can add this condition in auto mode 
   if(ecValue < ecLow){ // pump AB solution to up ec value in water
     controlPumpEc = 1;
   }
@@ -647,7 +741,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   Serial.print("phMan :");Serial.println(phMan);*/
   
   
-  
+  //-------------------- can add this condition in auto mode 
   if((phValue > phHigh)&&(controlPumpEc != 1)){ // pump pH solution to up pH value in water
     controlPumpPH = 1;
   }
@@ -657,7 +751,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   else{ // low pH value in water
     controlPumpPH = 0;
   }
-
+  
   // Select switch
   if((phAuto == 1)&&(phMan == 1)){ // swphModeOff
     // Rtu relay off case 0
@@ -730,9 +824,153 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   
 }
 void controlGrowLight(){ //switch mode --> timer --> Return state of relay
+  static unsigned long lastSaveTimeoOff;
+  static unsigned long lastSaveTimeoOn;
+  static unsigned long lastSaveTimeoAuto;
+  static bool firstAuto = 0;
+  GLAuto = swAutoGL.get_status();
+  GLMan = swManGL.get_status();
+  /*
+   nowHour,nowMinute,nowSecond;       //RTC HH:MM:SS
+   startHour,startMinute,startSecond; //ON HH:MM:SS 
+   stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
+   growLigh1,growLigh2,growLigh3,growLigh4;
+  */
+  static int startTimeInSeconds;
+  static int stopTimeInSeconds;
+  static int currentTimeInSeconds;
+  if(currentTimeInSeconds >= startTimeInSeconds && currentTimeInSeconds < stopTimeInSeconds){
+   timeonGL = 1;
+  }
+  else{
+    timeonGL = 0;
+  }
+
+  // Select switch
+  if((GLAuto == 1)&&(GLMan == 1)){ // sw grow light Mode off
+    firstAuto = 0;
+    if(growLigh1 != LOW){
+      relayRtu(8);
+      growLigh1 = LOW;
+    }
+    if(growLigh2 != LOW){
+      relayRtu(10);
+      growLigh2 = LOW;
+    }
+    if(growLigh3 != LOW){
+      relayRtu(12);
+      growLigh3 = LOW;
+    }
+    if(growLigh4 != LOW){
+      relayRtu(14);
+      growLigh4 = LOW;
+    }
+
+    if (currentMillis - lastSaveTimeoOff >= 120000U) {
+      relayRtu(8);// off command growLigh1
+      growLigh1 = LOW;
+      relayRtu(10);// off command growLigh2
+      growLigh2 = LOW;
+      relayRtu(12);// off command growLigh3
+      growLigh3 = LOW;
+      relayRtu(14);// off command growLigh4
+      growLigh4 = LOW;
+      lastSaveTimeoOff = currentMillis;
+      //Serial.println("sw man on");
+    }
+  }
+  else if ((GLAuto == 0)&&(GLMan == 1)){ //sw grow light Mode Auto *timer*
+  //note GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
+  startTimeInSeconds = abs((startHour * 60 * 60) + (startMinute * 60) + startSecond);
+  stopTimeInSeconds = abs((stopHour * 60 * 60) + (stoptMinute * 60) + stopSecond);
+  currentTimeInSeconds = abs((nowHour * 60 * 60) + (nowMinute * 60) + nowSecond);
+
+  if(currentTimeInSeconds >= startTimeInSeconds && currentTimeInSeconds < stopTimeInSeconds){
+   timeonGL = 1;
+  }
+  else{
+    timeonGL = 0;
+  }
+
+  if (currentMillis - lastSaveTimeoAuto >= 120000U || firstAuto == 0) {
+    firstAuto = 1;
+    if(timeonGL == 1 && GrowLight1Control1 == 1){
+      relayRtu(7);
+      growLigh1 = HIGH;
+    }else{
+      relayRtu(8);
+      growLigh1 = LOW;
+    }
+    if(timeonGL == 1 && GrowLight1Control2 == 1){
+      relayRtu(9);
+      growLigh2 = HIGH;
+    }else{
+      relayRtu(10);
+      growLigh2 = LOW;
+    }
+    if(timeonGL == 1 && GrowLight1Control3 == 1){
+      relayRtu(11);
+      growLigh3 = HIGH;
+    }else{
+      relayRtu(12);
+      growLigh3 = LOW;
+    }
+    if(timeonGL == 1 && GrowLight1Control4 == 1){
+      relayRtu(13);
+      growLigh4 = HIGH;
+    }else{
+      relayRtu(14);
+      growLigh4 = LOW;
+    }
+  }
+
+
+ 
+
+  }
+  else if ((GLAuto == 1)&&(GLMan == 0)){ //sw grow light Mode Man
+    firstAuto = 0;
+    if(growLigh1 != HIGH){
+      relayRtu(7);
+      growLigh1 = HIGH;
+    }
+    if(growLigh2 != HIGH){
+      relayRtu(9);
+      growLigh2 = HIGH;
+    }
+    if(growLigh3 != HIGH){
+      relayRtu(11);
+      growLigh3 = HIGH;
+    }
+    if(growLigh4 != HIGH){
+      relayRtu(13);
+      growLigh4 = HIGH;
+    }
+
+    if (currentMillis - lastSaveTimeoOn >= 120000U) {
+      relayRtu(7);// on command growLigh1
+      growLigh1 = HIGH;
+      relayRtu(9);// on command growLigh2
+      growLigh2 = HIGH;
+      relayRtu(11);// on command growLigh3
+      growLigh3 = HIGH;
+      relayRtu(13);// on command growLigh4
+      growLigh4 = HIGH;
+      lastSaveTimeoOn = currentMillis;
+      //Serial.println("sw man on");
+    }
+
+  }
+  else{
+    // serial error
+    // Rtu relay off
+    Serial.println("sw GrowLight error");
+  }
+
   
 }
 void controlWaterPump(){ //switch mode --> Return state of relay
+  
   
 }
 void controlWaterLevel(){ //switch mode --> lv of water in tank --> Return state of relay
@@ -764,5 +1002,81 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU2, 8);
       delay(50);
       break;
+
+    case 5:
+      //sending conmand relay off pump
+      //relay 50-100
+      Serial2.write(ON_RTU3, 8);
+      delay(50);
+      break;
+    case 6:
+      //sending conmand relay off  pump
+      //relay 50-100
+      Serial2.write(OFF_RTU3, 8);
+      delay(50);
+      break;
+
+    case 7:
+      //sending conmand relay on gl1
+      //relay 50-100
+      Serial2.write(ON_RTU16, 8);
+      delay(50);
+      break;
+    case 8:
+      //sending conmand relay off  gl1
+      //relay 50-100
+      Serial2.write(OFF_RTU16, 8);
+      delay(50);
+      break;
+    case 9:
+      //sending conmand relay on gl2
+      //relay 50-100
+      Serial2.write(ON_RTU15, 8);
+      delay(50);
+      break;
+    case 10:
+      //sending conmand relay off  gl2
+      //relay 50-100
+      Serial2.write(OFF_RTU15, 8);
+      delay(50);
+      break;
+    case 11:
+      //sending conmand relay on gl3
+      //relay 50-100
+      Serial2.write(ON_RTU14, 8);
+      delay(50);
+      break;
+    case 12:
+      //sending conmand relay off  gl3
+      //relay 50-100
+      Serial2.write(OFF_RTU14, 8);
+      delay(50);
+      break;
+    case 13:
+      //sending conmand relay on gl4
+      //relay 50-100
+      Serial2.write(ON_RTU13, 8);
+      delay(50);
+      break;
+    case 14:
+      //sending conmand relay off  g14
+      //relay 50-100
+      Serial2.write(OFF_RTU13, 8);
+      delay(50);
+      break;
+  }
+}
+void requestTime(){
+  Blynk.sendInternal("rtc","sync"); //using when want to get time clock
+}
+BLYNK_WRITE(InternalPinRTC){
+  const unsigned long DEFAULT_TIME = 1357041600; // Jan 1 2013
+  unsigned long blynkTime = param.asLong();
+  if (blynkTime >= DEFAULT_TIME) 
+  {
+    setTime(blynkTime);
+    Serial.println(blynkTime);
+    Serial.println(String("RTC Server: ") + hour() + ":" + minute() + ":" + second());
+    Serial.println(String("Day of Week: ") + weekday()); 
   }
 }
