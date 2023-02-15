@@ -16,3 +16,34 @@ class swInput{
     }
   
 };//end of class
+
+/*
+#include <arduino.h>
+
+class swInput {
+  private:
+    int t_pin;
+    unsigned long lastDebounceTime;
+    const unsigned long debounceDelay;
+
+  public:
+    swInput(int pin, unsigned long debounceDelay) {
+      t_pin = pin;
+      this->debounceDelay = debounceDelay;
+      pinMode(t_pin, INPUT_PULLUP);
+    }
+
+    bool get_status() {
+      int buttonState = digitalRead(t_pin);
+      if (buttonState != lastButtonState) {
+        lastDebounceTime = millis();
+      }
+      if ((millis() - lastDebounceTime) > debounceDelay) {
+        lastButtonState = buttonState;
+        return buttonState;
+      }
+      return lastButtonState;
+    }
+};
+
+*/
