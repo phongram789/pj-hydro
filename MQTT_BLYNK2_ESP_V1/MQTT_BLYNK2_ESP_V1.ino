@@ -14,6 +14,7 @@
 #include "INPUT_PULLUP.h"
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 RTClib RTC;
+DS3231 Clock;
 
 PZEM004Tv30 pzem(Serial2, 16, 17,0x07);
 
@@ -78,15 +79,14 @@ bool flowwing = 1;
 #define pinSwitchEcMan 18
 
 #define pinSwitchPHAuto 4
-#define pinSwitchPHMan 0
+#define pinSwitchPHMan 15
 
 #define pinSwitchGrowlightAuto 19
 #define pinSwitchGrowlightMan 23
 
-#define pinSwitchtestauto 2
 #define pinSwitchtestman 3
 
-const int buttonPinMainWaterPump = 15;
+bool buttonPinMainWaterPump = 0; // 15 สลับกับขา 0 เพราะ connected to on-board LED, must be left floating or LOW to enter flashing mode
 
 bool mainWaterPump = HIGH;
 Bounce debouncer = Bounce(); // create obj
@@ -97,12 +97,25 @@ swInput swAutoPH(pinSwitchPHAuto);
 swInput swManPH(pinSwitchPHMan);
 swInput swAutoGL(pinSwitchGrowlightAuto);
 swInput swManGL(pinSwitchGrowlightMan);
-swInput swAutotest(pinSwitchtestauto);
-swInput swMantest(pinSwitchtestman);
+swInput swManWaterIn(pinSwitchtestman);
+
+/*#define RXD2 16
+#define TXD2 17
+float fVoltage;
+float fCurrent;
+float fPower;
+float fEnergy;
+float fFrequency;
+uint8_t bufferModbus[25];*/
+
+WidgetLCD lcdBlynk(V16);
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  //Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  //while (!Serial2)
+  //  ;
   initEEPROM();
   lcd.init();
   lcd.backlight();
@@ -112,6 +125,7 @@ void setup() {
   mqtt.setCallback(callback);
   Blynk.config(auth,"blynk.cloud", 8080);
   timer.setInterval(2000L, sendSensor);
+  timer.setInterval(10000L, lcdBlynkPrint);
 
   //--------------push button-----------------
   debouncer.attach(buttonPinMainWaterPump, INPUT_PULLUP);
@@ -135,8 +149,6 @@ void loop() {
   controlEC();
   controlPH();
   controlGrowLight();
-  
-
 }
 
 void sendSensor(){
@@ -152,30 +164,14 @@ void sendSensor(){
   Blynk.virtualWrite(V9, frequency);
   Blynk.virtualWrite(V15, pf);
 
-  //You can change button labels from hardware with 
-  //Blynk.virtualWrite(V10, growLigh1);
-  if(growLigh1 == HIGH){
-    Blynk.setProperty(V10, "onLabel", "ON");
-  }else{
-    Blynk.setProperty(V10, "offLabel", "OFF");
-  }
-  if(growLigh2 == HIGH){
-    Blynk.setProperty(V11, "onLabel", "ON");
-  }else{
-    Blynk.setProperty(V11, "offLabel", "OFF");
-  }
-  if(growLigh3 == HIGH){
-    Blynk.setProperty(V12, "onLabel", "ON");
-  }else{
-    Blynk.setProperty(V12, "offLabel", "OFF");
-  }
-  if(growLigh4 == HIGH){
-    Blynk.setProperty(V13, "onLabel", "ON");
-  }else{
-    Blynk.setProperty(V13, "offLabel", "OFF");
-  }
+  //You can change button labels from hardware with
+  Blynk.virtualWrite(V10, growLigh1);
+  Blynk.virtualWrite(V11, growLigh2);
+  Blynk.virtualWrite(V12, growLigh3);
+  Blynk.virtualWrite(V13, growLigh4);
   
-}
+  
+};
 
 void Mqttreconnect(){
   static unsigned long timepoint = 0;
@@ -517,8 +513,7 @@ void SerialstatusConnecting(){
   Serial.println(controlPumpEc);
   Serial.print("mode controlPumpPh :");
   Serial.println(controlPumpPH);*/
-  Serial.println("testAuto : " + String(swAutotest.get_status()));
-  Serial.println("testman : " + String(swMantest.get_status()));
+  //Serial.println("swManWaterIn : " + String(swManWaterIn.get_status()));
   }
 };
 
@@ -598,11 +593,21 @@ void functionLcd(){
     }
 };
 
+void clearSerial2Buffer() {
+  Serial2.setTimeout(1); // set a small timeout to discard incoming data
+  while (Serial2.available()) {
+    Serial2.read(); // read any incoming data (which will be discarded)
+  }
+  Serial2.setTimeout(1000); // set the timeout back to a normal value 
+}
+
 void pzemRead(){
   static unsigned long lastSaveTime = 0;
-    if (currentMillis - lastSaveTime >= 10000U) {
+  static int countError;
+    if (currentMillis - lastSaveTime >= 8000U) {
       lastSaveTime = currentMillis;
-      for(int i = 1 ; i <= 2 ; i++){
+      clearSerial2Buffer();
+
         //Serial.print("Custom Address:");
         //Serial.println(pzem.readAddress(), HEX);
 
@@ -616,7 +621,8 @@ void pzemRead(){
 
         // Check if the data is valid
         if(isnan(voltage)){
-          //Serial.println("Error reading voltage");
+          countError++;
+          //Serial.println("Error reading voltage: "+ String(countError));
         } else if (isnan(current)) {
             Serial.println("Error reading current");
         } else if (isnan(power)) {
@@ -628,6 +634,7 @@ void pzemRead(){
         } else if (isnan(pf)) {
             Serial.println("Error reading power factor");
         } else {
+            countError=0;
 
             // Print the values to the Serial console
             /*Serial.print("Voltage: ");      Serial.print(voltage);      Serial.println("V");
@@ -639,8 +646,7 @@ void pzemRead(){
 
         }
         //Serial.println();
-        delay(100);
-      }
+      
     }
 }
 
@@ -662,20 +668,22 @@ void RTCfunction(){
     Serial.print(':');
     Serial.print(now.second(), DEC);
     Serial.println();*/
-    if(now.year() < 2023){
+    int year = now.year();
+    //Serial.println("This year: " + String(year));
+    if(year  < 2023 || year  > 2100){
       Rtcmodule = 0;
       if (currentMillis - lastSaveTimeError >= 10000U) {
-        Serial.println("RTC ERROR");
+        //Serial.println("RTC ERROR");
         requestTime();
         lastSaveTimeError = currentMillis;
       }
     }
     else{
       Rtcmodule = 1;
+      nowHour=now.hour();
+      nowMinute=now.minute();
+      nowSecond=now.second();
     }
-    nowHour=now.hour();
-    nowMinute=now.minute();
-    nowSecond=now.second();
   }
 };
 
@@ -775,7 +783,7 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
         if(relayStateEC == HIGH){
           Serial.print("relayStateEC: ");
           Serial.println(relayStateEC);  
-          relayRtu(1);          
+          relayRtu(1);   
         }
         else{
           Serial.print("relayStateEC else: ");
@@ -1127,6 +1135,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU1, 8);
       Serial.println("case 1:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 2:
       //sending conmand relay off ec ch
@@ -1134,6 +1144,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU1, 8);
       Serial.println("case 1:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 3:
       //sending conmand relay on ph ch
@@ -1141,6 +1153,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU2, 8);
       Serial.println("case 3:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 4:
       //sending conmand relay off ph ch
@@ -1148,6 +1162,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU2, 8);
       Serial.println("case 4:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
 
     case 5:
@@ -1156,6 +1172,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU3, 8);
       Serial.println("case 5:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 6:
       //sending conmand relay off  pumpกวน
@@ -1163,6 +1181,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU3, 8);
       delay(50);
       Serial.println("case 6:");
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
 
     case 7:
@@ -1171,6 +1191,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU16, 8);
       Serial.println("case 7:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 8:
       //sending conmand relay off  gl1
@@ -1178,6 +1200,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU16, 8);
       Serial.println("case 8:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 9:
       //sending conmand relay on gl2
@@ -1185,6 +1209,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU15, 8);
       Serial.println("case 9:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 10:
       //sending conmand relay off  gl2
@@ -1192,6 +1218,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU15, 8);
       Serial.println("case 10:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 11:
       //sending conmand relay on gl3
@@ -1199,6 +1227,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU14, 8);
       Serial.println("case 11:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 12:
       //sending conmand relay off  gl3
@@ -1206,6 +1236,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU14, 8);
       Serial.println("case 12:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 13:
       //sending conmand relay on gl4
@@ -1213,6 +1245,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU13, 8);
       Serial.println("case 13:");
       delay(50);
+      Serial2.flush();
+     // Serial2.flushReceive();
       break;
     case 14:
       //sending conmand relay off  g14
@@ -1220,6 +1254,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU13, 8);
       Serial.println("case 14:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     
     case 15:
@@ -1228,6 +1264,8 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(ON_RTU12, 8);
       Serial.println("case 15:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
     case 16:
       //sending conmand relay off  pumpกวน
@@ -1235,20 +1273,119 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       Serial2.write(OFF_RTU12, 8);
       Serial.println("case 16:");
       delay(50);
+      Serial2.flush();
+      //Serial2.flushReceive();
       break;
   }
 }
 void requestTime(){
   Blynk.sendInternal("rtc","sync"); //using when want to get time clock
+  //Serial.println("requestTime()");
 }
+
 BLYNK_WRITE(InternalPinRTC){
   const unsigned long DEFAULT_TIME = 1357041600; // Jan 1 2013
   unsigned long blynkTime = param.asLong();
+  int day1,month1,year1,weekday1,nowSecond1,nowMinute1,nowHour1; //18 02 2023 6
+  
   if (blynkTime >= DEFAULT_TIME) 
   {
     setTime(blynkTime);
-    Serial.println(blynkTime);
-    Serial.println(String("RTC Server: ") + hour() + ":" + minute() + ":" + second());
-    Serial.println(String("Day of Week: ") + weekday()); 
+    //Serial.println(blynkTime);
+    //Serial.println(String("RTC Server: ") + hour() + ":" + minute() + ":" + second());
+    //String currentDate = String(day()) + " " + month() + " " + year();
+    //Serial.println(currentDate);
+    //Serial.println(String("Day of Week: ") + weekday()); 
+    int 
+    day1 = day();
+    month1 = month();
+    year1 = year();
+    weekday1 = weekday();
+    nowHour1 = hour();
+    nowMinute1 = minute();
+    nowSecond1 = second();
+
+    nowHour = nowHour1;
+    nowMinute = nowMinute1;
+    nowSecond = nowSecond1;
+    
+    settime(year1,month1,day1,weekday1,nowHour,nowMinute,nowSecond);
+    
   }
+}
+void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte Second){ 
+  static int countSetError = 0 ;
+  if(countSetError < 1){
+    Clock.setYear(Year);
+    Clock.setMonth(Month);
+    Clock.setDate(Date);
+    Clock.setDoW(DoW);
+    Clock.setHour(Hour);
+    Clock.setMinute(Minute);
+    Clock.setSecond(Second);
+    countSetError++;
+  }
+}
+
+//GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; 
+BLYNK_WRITE(V10){
+  GrowLight1Control1 = param.asInt();
+  Serial.println(GrowLight1Control1);
+
+}
+BLYNK_WRITE(V11){
+  GrowLight1Control2 = param.asInt();
+  Serial.println(GrowLight1Control2);
+}
+BLYNK_WRITE(V12){
+  GrowLight1Control3 = param.asInt();
+  Serial.println(GrowLight1Control3);
+}
+BLYNK_WRITE(V13){
+  GrowLight1Control4 = param.asInt();
+  Serial.println(GrowLight1Control4);
+}
+BLYNK_WRITE(V14){
+  buttonPinMainWaterPump = param.asInt();
+  //BLYNK_LOG("buttonPinMainWaterPump: %d",buttonPinMainWaterPump);
+  Serial.println(buttonPinMainWaterPump);
+
+}
+
+BLYNK_WRITE(V17){
+  phLow = param.asFloat();
+  //BLYNK_LOG("phLow: %d",phLow);
+  Serial.println(phLow);
+
+}
+BLYNK_WRITE(V18){
+  phHigh = param.asFloat();
+  //BLYNK_LOG("phHigh: %d",phHigh);
+  Serial.println(phHigh);
+}
+BLYNK_WRITE(V19){
+  ecLow = param.asFloat();
+  //BLYNK_LOG("phHigh: %d",phHigh);
+  Serial.println(ecLow);
+}
+BLYNK_WRITE(V20){
+  ecHigh = param.asFloat();
+  //BLYNK_LOG("phHigh: %d",phHigh);
+  Serial.println(ecHigh);
+}
+
+void lcdBlynkPrint(){
+  //x = position symbol 0 -15 , y = line 0,1
+  lcdBlynk.clear();
+  const String text = String("RTC:") + nowHour + ":" + nowMinute + ":" + nowSecond;
+  const String text2 =  String("On Time : ") + startHour + ":" + startMinute + ":" + startSecond;
+  const String text3 =  String("Off Time: ") + stopHour + ":" + stopMinute + ":" + stopSecond;
+  //Serial.println(text);
+
+  lcdBlynk.clear(); //Use it to clear the LCD Widget
+  lcdBlynk.print(0, 0, text2); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
+  lcdBlynk.print(0, 1, text3); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
+  lcdBlynk.print(0, 2, text);
+  
+ 
 }
