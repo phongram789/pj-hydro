@@ -1,4 +1,18 @@
 // ขา 0 , 2 ห้ามเป็น low
+//pzemRead และ waterRs485 และ RTC จะทำให้ ปู่ม pin 0 debouce มีปัญหา
+/*
+
+          Work list to do 
+          function to check flowing of A B n Acic
+          function draning water and fill tank
+          function pumping went AB AB n Acid solutions r pumpping 
+          function count water wnet fill tank n calculate bill of water
+          function updatre version of smooth to read ec and ph
+
+          function save all value should be save in eeprom
+
+
+*/
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
@@ -7,11 +21,39 @@
 #include <EEPROM.h>
 #include <PZEM004Tv30.h>
 #include <Wire.h>
+#include "ModbusMaster.h"
 #include "DS3231.h"
 #include <LiquidCrystal_I2C.h>
 #include <Bounce2.h>
 #include "rtu.h"
 #include "INPUT_PULLUP.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include "DHT.h"
+#include "tds.h"
+#define PHPIN 39
+#define ECPIN 36
+#define DHTPIN 33
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
+TDS tds(ECPIN);
+ModbusMaster node;
+
+//-------------pH-----------------
+float voltagePH,phValue;
+float acidVoltage = 1810;
+float neutralVoltage = 1370;
+const int smoothFactor = 10;
+float lastPH;
+
+//--------------------------------
+float ecValue,TdsValue,lastEC;
+
+
+#define ONE_WIRE_BUS 26 //กำหนดขาที่จะเชื่อมต่อ Sensor
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensorsWatertemp(&oneWire);
+
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 RTClib RTC;
 DS3231 Clock;
@@ -24,7 +66,7 @@ BlynkTimer timer;
 #define BLYNK_PRINT Serial
 
 #define EEPROM_SIZE 64
-const char* ssid = "ooy";
+const char* ssid = "ooy2G";
 const char* password = "0863447295";
 const char* mqtt_server = "broker.netpie.io";
 const int mqtt_port = 1883;
@@ -39,9 +81,8 @@ const char* mqtt_password = "n6htDnjn7rLq8_epUM)N-M076iMWy4t4";
 char auth[] = BLYNK_AUTH_TOKEN;
 
 const char* subscribe_topic = "@msg/temp";
-float t = 30.2,h = 100,ecValue = 1.3 ,phValue = 7.5;
 unsigned long currentMillis = 0;
-
+float temperatureC,h,t;
 
 
 bool Rtcmodule; // 0 = error, 1 = good 
@@ -54,8 +95,6 @@ int currentTimeInSeconds;
 
 bool growLigh1,growLigh2,growLigh3,growLigh4; //status on working of grow light
 
-//bool mainWaterPump; //status on working of water pump to line plant zone
-
 bool timeonGL; //0 == off , 1 == on //value of on/off in time clock
 
 bool controlPumpEc,controlPumpPH; //void Control 
@@ -66,14 +105,18 @@ bool relayStatePH;
 bool statusBlynk,statusMqtt,statusWifi; 
 
 float voltage ,current ,power ,energy , frequency, pf; // values from energy module
+float ft = NULL;// input from blynk
+float Unit,energyprice;
 
 bool ecAuto, ecMan, phAuto, phMan ,GLAuto ,GLMan; //switch mode 
 
 bool swEcModeOff,swEcModeMan,swEcModeAuto;  //switch mode
 
 bool GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; // read input from blynk and mtqq 0 = off, 1 = on --> save eefrom repeate
-bool firstAuto = 0;
-bool flowwing = 1;
+
+bool updateGl = 0;
+bool updatePumpMain = 0;
+bool flowwing = 1; // water in main line plant is flowing is good
 
 #define pinSwitchEcAuto 5
 #define pinSwitchEcMan 18
@@ -86,9 +129,10 @@ bool flowwing = 1;
 
 #define pinSwitchtestman 3
 
-bool buttonPinMainWaterPump = 0; // 15 สลับกับขา 0 เพราะ connected to on-board LED, must be left floating or LOW to enter flashing mode
+#define buttonPinMainWaterPump  0 // 15 สลับกับขา 0 เพราะ connected to on-board LED, must be left floating or LOW to enter flashing mode
 
 bool mainWaterPump = HIGH;
+bool mainWaterPump2 = HIGH;
 Bounce debouncer = Bounce(); // create obj
 
 swInput swAutoEC(pinSwitchEcAuto);
@@ -99,23 +143,54 @@ swInput swAutoGL(pinSwitchGrowlightAuto);
 swInput swManGL(pinSwitchGrowlightMan);
 swInput swManWaterIn(pinSwitchtestman);
 
-/*#define RXD2 16
-#define TXD2 17
-float fVoltage;
-float fCurrent;
-float fPower;
-float fEnergy;
-float fFrequency;
-uint8_t bufferModbus[25];*/
+#define pintestlevel 35//25
+swInput swtest(pintestlevel);
+#define pintestlevel2 25
+swInput swtest2(pintestlevel2);
 
 WidgetLCD lcdBlynk(V16);
+
+//---------------------test station-----------------------
+#define WaterFowPinMainLine 27
+int pulseCounterMainLine;
+#define WaterFowPinMainLine2 14
+int pulseCounterMainLine2;
+
+#define WaterFowPinMainLine3 34
+int pulseCounterMainLine3;
+
+#define WaterFowPinMainLine4 32
+int pulseCounterMainLine4;
+
+#define WaterFowPinMainLine5 13
+int pulseCounterMainLine5;
+
+void IRAM_ATTR pulseCounter()
+{
+  pulseCounterMainLine++;
+}
+
+void IRAM_ATTR pulseCounter2()
+{
+  pulseCounterMainLine2++;
+}
+
+void IRAM_ATTR pulseCounter3()
+{
+  pulseCounterMainLine3++;
+}
+void IRAM_ATTR pulseCounter4()
+{
+  pulseCounterMainLine4++;
+}
+void IRAM_ATTR pulseCounter5()
+{
+  pulseCounterMainLine5++;
+}
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  //Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
-  //while (!Serial2)
-  //  ;
   initEEPROM();
   lcd.init();
   lcd.backlight();
@@ -126,11 +201,35 @@ void setup() {
   Blynk.config(auth,"blynk.cloud", 8080);
   timer.setInterval(2000L, sendSensor);
   timer.setInterval(10000L, lcdBlynkPrint);
+  timer.setInterval(2000L, readWaterTemp);
+  timer.setInterval(5000L, waterRs485);
+  //timer.setInterval(10L, testprint);
+
+  
+  sensorsWatertemp.begin();
+
+  // rs485
+  //Serial2.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  while(!Serial2);
+  node.begin(1, Serial2); // Id slave is 1 
 
   //--------------push button-----------------
   debouncer.attach(buttonPinMainWaterPump, INPUT_PULLUP);
-  debouncer.interval(20); // กำหนดเวลาการเปลี่ยนสถานะให้กับ debouncer object ที่ 10 มิลลิวินาที
+  debouncer.interval(20); // กำหนดเวลาการเปลี่ยนสถานะให้กับ debouncer object ที่ 20 มิลลิวินาที
 
+  //------------flowing-----------------------
+  pinMode(WaterFowPinMainLine, INPUT_PULLUP);
+  pinMode(WaterFowPinMainLine2, INPUT_PULLUP);
+  pinMode(WaterFowPinMainLine3, INPUT_PULLUP);
+  pinMode(WaterFowPinMainLine4, INPUT_PULLUP);
+  pinMode(WaterFowPinMainLine5, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(WaterFowPinMainLine), pulseCounter, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WaterFowPinMainLine2), pulseCounter2, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WaterFowPinMainLine3), pulseCounter3, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WaterFowPinMainLine4), pulseCounter4, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WaterFowPinMainLine5), pulseCounter5, FALLING);
+  dht.begin();
   delay(500);
 }
 
@@ -149,28 +248,23 @@ void loop() {
   controlEC();
   controlPH();
   controlGrowLight();
+  readDHT();
+  PH();
+  Ec();
 }
 
-void sendSensor(){
-  //float voltage ,current ,power ,energy , frequency, pf;
-  float h = random(0,30);
-  float t = random(0,100);
-  Blynk.virtualWrite(V3, h);
-  Blynk.virtualWrite(V4, t);
-  Blynk.virtualWrite(V5, voltage);
-  Blynk.virtualWrite(V6, current);
-  Blynk.virtualWrite(V7, power);
-  Blynk.virtualWrite(V8, energy);
-  Blynk.virtualWrite(V9, frequency);
-  Blynk.virtualWrite(V15, pf);
+void testprint(){
+    Serial.println("digitalRead(buttonPinMainWaterPump): " + String(digitalRead(buttonPinMainWaterPump)));
+}
 
-  //You can change button labels from hardware with
-  Blynk.virtualWrite(V10, growLigh1);
-  Blynk.virtualWrite(V11, growLigh2);
-  Blynk.virtualWrite(V12, growLigh3);
-  Blynk.virtualWrite(V13, growLigh4);
+void sendSensor(){ //to blynk
+  //float voltage ,current ,power ,energy , frequency, pf;
+  //Blynk.virtualWrite(V15, pf);
+
+  //test
+  //readWaterTemp();
   
-  
+
 };
 
 void Mqttreconnect(){
@@ -330,9 +424,6 @@ void initEEPROM() {
   //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
   /*int startHour,startMinute,startSecond; //ON HH:MM:SS 
   int stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS */
-  
-
-
 };
 
 void callback(char* topic,byte* payload, unsigned int length) {
@@ -344,13 +435,6 @@ void callback(char* topic,byte* payload, unsigned int length) {
     msg = msg + (char)payload[i];
   }
    Serial.println(msg);
-  if (String(topic) == subscribe_topic) { //subscribe_topic = "@msg/temp"
-    if (msg == "1"){
-      Serial.println("Turn on LED");
-    } else {
-      Serial.println("Turn off LED");
-    }
-  }
   //float phLow,phHigh,ecLow,ecHigh;
   if (String(topic) == "@msg/eclow") { 
     ecLow = msg.toFloat();
@@ -378,40 +462,35 @@ void callback(char* topic,byte* payload, unsigned int length) {
   if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl1") { 
     if (msg == "1"){
       GrowLight1Control1 = 1;
-      firstAuto = 0;
     } else {
       GrowLight1Control1 = 0;
-      firstAuto = 1;
     }
-    
+    updateGl = 0;
   }
   if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl2") { 
     if (msg == "1"){
       GrowLight1Control2 = 1;
-      firstAuto = 0;
     } else {
       GrowLight1Control2 = 0;
-      firstAuto = 1;
     }
+    updateGl = 0;
   }
   if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl3") { 
     if (msg == "1"){
       GrowLight1Control3 = 1;
-      firstAuto = 0;
     } else {
       GrowLight1Control3 = 0;
-      firstAuto = 1;
     }
+    updateGl = 0;
     
   }
   if (String(topic) == "@msg/kmutnb/cs/smarthydroponic1/gl4") { 
     if (msg == "1"){
       GrowLight1Control4 = 1;
-      firstAuto = 0;
     } else {
       GrowLight1Control4 = 0;
-      firstAuto = 1;
     }
+    updateGl = 0;
   }
   
   //-------------------------main water pump pumping to line plant
@@ -514,6 +593,30 @@ void SerialstatusConnecting(){
   Serial.print("mode controlPumpPh :");
   Serial.println(controlPumpPH);*/
   //Serial.println("swManWaterIn : " + String(swManWaterIn.get_status()));
+  //pulseCounterMainLine
+  //Serial.println( );
+  /*Serial.println("digitalRead(buttonPinMainWaterPump): " + String(digitalRead(buttonPinMainWaterPump)));
+  Serial.println("mainWaterPump: " + String(mainWaterPump));
+  Serial.println("mainWaterPump2: " + String(mainWaterPump2));*/
+  /*Serial.println( "pulseCounterMainLine " + String(pulseCounterMainLine));
+  Serial.println( "pulseCounterMainLine2 " + String(pulseCounterMainLine2));
+  Serial.println( "pulseCounterMainLine3 " + String(pulseCounterMainLine3));
+  Serial.println( "pulseCounterMainLine4 " + String(pulseCounterMainLine4));
+  Serial.println( "pulseCounterMainLine5 " + String(pulseCounterMainLine5));*/
+
+ // Serial.println("level " + String(swtest.get_status()));
+ // Serial.println("level2 " + String(swtest2.get_status()));
+
+ /* Serial.print("EC: ");
+  Serial.print(lastEC);
+  Serial.println(" ms/cm");
+  Serial.print("pH: ");
+  Serial.println(lastPH);*/
+  /*Serial.print("GLAuto: ");
+      Serial.println(GLAuto);
+      Serial.print("GLMan: ");
+      Serial.println(GLMan);*/
+
   }
 };
 
@@ -604,7 +707,7 @@ void clearSerial2Buffer() {
 void pzemRead(){
   static unsigned long lastSaveTime = 0;
   static int countError;
-    if (currentMillis - lastSaveTime >= 8000U) {
+    if (currentMillis - lastSaveTime >= 10000U) {
       lastSaveTime = currentMillis;
       clearSerial2Buffer();
 
@@ -622,7 +725,7 @@ void pzemRead(){
         // Check if the data is valid
         if(isnan(voltage)){
           countError++;
-          //Serial.println("Error reading voltage: "+ String(countError));
+          Serial.println("Error reading voltage: "+ String(countError));
         } else if (isnan(current)) {
             Serial.println("Error reading current");
         } else if (isnan(power)) {
@@ -635,6 +738,19 @@ void pzemRead(){
             Serial.println("Error reading power factor");
         } else {
             countError=0;
+            
+            Unit = (energy/1000);
+            if(ft == NULL){
+              ft = 93.49;
+            }
+            energyprice = calEnergyPrice(Unit,ft);
+            Blynk.virtualWrite(V21, energyprice);
+            Blynk.virtualWrite(V23, Unit);
+            Blynk.virtualWrite(V5, voltage);
+            Blynk.virtualWrite(V6, current);
+            Blynk.virtualWrite(V7, power);
+            Blynk.virtualWrite(V8, energy);
+            Blynk.virtualWrite(V9, frequency);
 
             // Print the values to the Serial console
             /*Serial.print("Voltage: ");      Serial.print(voltage);      Serial.println("V");
@@ -642,11 +758,12 @@ void pzemRead(){
             Serial.print("Power: ");        Serial.print(power);        Serial.println("W");
             Serial.print("Energy: ");       Serial.print(energy,3);     Serial.println("kWh");
             Serial.print("Frequency: ");    Serial.print(frequency, 1); Serial.println("Hz");
-            Serial.print("PF: ");           Serial.println(pf);*/
-
+            Serial.print("PF: ");           Serial.println(pf);
+            Serial.println();*/
         }
-        //Serial.println();
-      
+        if (countError > 200){
+          lcdBlynkPrintError("Module energy error");
+        }
     }
 }
 
@@ -719,6 +836,7 @@ void EEPROMfunction(){
     EEPROM.write(address, GrowLight1Control3);
     address += sizeof(GrowLight1Control3);
     EEPROM.write(address, GrowLight1Control4);
+    //state of grow light
     EEPROM.commit();
     //work list hear
     //
@@ -961,16 +1079,10 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
   static unsigned long lastSaveTimeoAuto;
   GLAuto = swAutoGL.get_status();
   GLMan = swManGL.get_status();
-  /*
-   nowHour,nowMinute,nowSecond;       //RTC HH:MM:SS
-   startHour,startMinute,startSecond; //ON HH:MM:SS 
-   stopHour,stoptMinute,stopSecond;   //OFF HH:MM:SS
-   growLigh1,growLigh2,growLigh3,growLigh4;
-  */
 
   // Select switch
   if((GLAuto == 1)&&(GLMan == 1)){ // sw grow light Mode off
-    firstAuto = 0;
+    updateGl = 0;
     if(growLigh1 != LOW){
       relayRtu(8);
       growLigh1 = LOW;
@@ -1003,6 +1115,7 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
   }
   else if ((GLAuto == 0)&&(GLMan == 1)){ //sw grow light Mode Auto *timer*
   //note GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
+
     startTimeInSeconds = abs((startHour * 60 * 60) + (startMinute * 60) + startSecond);
     stopTimeInSeconds = abs((stopHour * 60 * 60) + (stopMinute * 60) + stopSecond);
     currentTimeInSeconds = abs((nowHour * 60 * 60) + (nowMinute * 60) + nowSecond);
@@ -1014,36 +1127,45 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
       timeonGL = 0;
     }
 
-  if (currentMillis - lastSaveTimeoAuto >= 120000U || firstAuto == 0) {
+  if (currentMillis - lastSaveTimeoAuto >= 120000U || updateGl == 0) {
     lastSaveTimeoAuto = currentMillis;
-    firstAuto = 1;
+    updateGl = 1;
     if(timeonGL == 1 && GrowLight1Control1 == 1){
       relayRtu(7);
       growLigh1 = HIGH;
+      //You can change button labels from hardware with
+      Blynk.virtualWrite(V10, growLigh1);
     }else{
       relayRtu(8);
       growLigh1 = LOW;
+      Blynk.virtualWrite(V10, growLigh1);
     }
     if(timeonGL == 1 && GrowLight1Control2 == 1){
       relayRtu(9);
       growLigh2 = HIGH;
+      Blynk.virtualWrite(V11, growLigh2);
     }else{
       relayRtu(10);
       growLigh2 = LOW;
+      Blynk.virtualWrite(V11, growLigh2);
     }
     if(timeonGL == 1 && GrowLight1Control3 == 1){
       relayRtu(11);
       growLigh3 = HIGH;
+      Blynk.virtualWrite(V12, growLigh3);
     }else{
       relayRtu(12);
       growLigh3 = LOW;
+      Blynk.virtualWrite(V12, growLigh3);
     }
     if(timeonGL == 1 && GrowLight1Control4 == 1){
       relayRtu(13);
       growLigh4 = HIGH;
+      Blynk.virtualWrite(V13, growLigh4);
     }else{
       relayRtu(14);
       growLigh4 = LOW;
+      Blynk.virtualWrite(V13, growLigh4);
     }
   }
 
@@ -1052,7 +1174,7 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
 
   }
   else if ((GLAuto == 1)&&(GLMan == 0)){ //sw grow light Mode Man
-    firstAuto = 0;
+    updateGl = 0;
     if(growLigh1 != HIGH){
       relayRtu(7);
       growLigh1 = HIGH;
@@ -1093,7 +1215,6 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
   
 }
 void controlWaterPump(){ //switch mode --> Return state of relay
-  static bool firstpump;
   static unsigned long lastSaveTimeHigh;
   static unsigned long lastSaveTimeLow;
   debouncer.update();
@@ -1101,28 +1222,27 @@ void controlWaterPump(){ //switch mode --> Return state of relay
   // กำหนดเงื่อนไขให้โค้ดโปรแกรมในวงเล็บปีกกาทำงานเมื่อสถานะปุ่มกดเปลี่ยนจาก HIGH เป็น LOW โดยเช็คจากฟังก์ชั่น fell()
   // หากต้องการเช็คสถานะจาก LOW เป็น HIGH ให้แทนที่ฟังก์ชั่น fell() ด้วยฟังก์ชั่น rose()
   if ( debouncer.fell() ) { 
-      mainWaterPump  = !mainWaterPump ; // สลับสถานะ
+    mainWaterPump2  = !mainWaterPump2 ; // สลับสถานะ
+    updatePumpMain = 0;
+    Serial.println("----------------------");
   }
   
-    if (currentMillis - lastSaveTimeHigh >= 60000U  && mainWaterPump == HIGH && flowwing == 1) {
-      //firstpump = 1;
+    if (currentMillis - lastSaveTimeHigh >= 60000U  && mainWaterPump == HIGH && flowwing == 1 || flowwing == 1 && updatePumpMain == 0) { // flowwing is status of health from water main flowing is good = 1 , bad = 0
       relayRtu(15);
       mainWaterPump = HIGH;
       lastSaveTimeHigh = currentMillis;
-      
+      updatePumpMain = 1;
+      Serial.println("mainWaterPump: " + String(mainWaterPump));
     }
     //RTU off
     else if (currentMillis - lastSaveTimeLow >= 60000U  && mainWaterPump == LOW) {
-      //firstpump = 0;
       relayRtu(16);
       mainWaterPump = LOW;
       lastSaveTimeLow = currentMillis;
+      updatePumpMain = 1;
     }else{
-
+      //updatePumpMain = 1;
     }
-    
-  
-
 }
 void controlWaterLevel(){ //switch mode --> lv of water in tank --> Return state of relay
   
@@ -1296,7 +1416,6 @@ BLYNK_WRITE(InternalPinRTC){
     //String currentDate = String(day()) + " " + month() + " " + year();
     //Serial.println(currentDate);
     //Serial.println(String("Day of Week: ") + weekday()); 
-    int 
     day1 = day();
     month1 = month();
     year1 = year();
@@ -1314,8 +1433,8 @@ BLYNK_WRITE(InternalPinRTC){
   }
 }
 void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte Second){ 
-  static int countSetError = 0 ;
-  if(countSetError < 1){
+  static int countSetError;
+  if(countSetError < 1 && Rtcmodule == 0){
     Clock.setYear(Year);
     Clock.setMonth(Month);
     Clock.setDate(Date);
@@ -1324,31 +1443,38 @@ void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte 
     Clock.setMinute(Minute);
     Clock.setSecond(Second);
     countSetError++;
+    Serial.println("Time update to RTC module done" );
   }
+  
 }
 
 //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; 
 BLYNK_WRITE(V10){
   GrowLight1Control1 = param.asInt();
   Serial.println(GrowLight1Control1);
-
+  updateGl = 0; // update status of auto mode to change to status from dashboard
 }
 BLYNK_WRITE(V11){
   GrowLight1Control2 = param.asInt();
   Serial.println(GrowLight1Control2);
+  updateGl = 0;
+
 }
 BLYNK_WRITE(V12){
   GrowLight1Control3 = param.asInt();
   Serial.println(GrowLight1Control3);
+  updateGl = 0;
 }
 BLYNK_WRITE(V13){
   GrowLight1Control4 = param.asInt();
   Serial.println(GrowLight1Control4);
+  updateGl = 0;
 }
 BLYNK_WRITE(V14){
-  buttonPinMainWaterPump = param.asInt();
+  mainWaterPump = param.asInt();
   //BLYNK_LOG("buttonPinMainWaterPump: %d",buttonPinMainWaterPump);
-  Serial.println(buttonPinMainWaterPump);
+  Serial.println(mainWaterPump);
+  updatePumpMain = 0;
 
 }
 
@@ -1374,18 +1500,197 @@ BLYNK_WRITE(V20){
   Serial.println(ecHigh);
 }
 
+BLYNK_WRITE(V22){
+  ft = param.asFloat();
+  //BLYNK_LOG("phHigh: %d",phHigh);
+  Serial.println(ft);
+}
 void lcdBlynkPrint(){
   //x = position symbol 0 -15 , y = line 0,1
   lcdBlynk.clear();
-  const String text = String("RTC:") + nowHour + ":" + nowMinute + ":" + nowSecond;
-  const String text2 =  String("On Time : ") + startHour + ":" + startMinute + ":" + startSecond;
-  const String text3 =  String("Off Time: ") + stopHour + ":" + stopMinute + ":" + stopSecond;
+  const String text = String("RTC:") + nowHour + ":" + nowMinute;
+  const String text2 =  String("On Time : ") + startHour + ":" + startMinute;
+  const String text3 =  String("Off Time: ") + stopHour + ":" + stopMinute;
   //Serial.println(text);
 
   lcdBlynk.clear(); //Use it to clear the LCD Widget
   lcdBlynk.print(0, 0, text2); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
   lcdBlynk.print(0, 1, text3); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
-  lcdBlynk.print(0, 2, text);
-  
- 
+  //lcdBlynk.print(0, 2, text);
 }
+void lcdBlynkPrintError(String text){
+  //x = position symbol 0 -15 , y = line 0,1
+  lcdBlynk.clear();
+  lcdBlynk.clear(); //Use it to clear the LCD Widget
+  lcdBlynk.print(0, 0, text); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
+}
+
+float calEnergyPrice(float Unit , float ft) {
+  float total = 0;
+  if (Unit <= 150) {
+    float Rate15 = 2.3488;
+    float Rate25 = 2.9882;
+    float Rate35 = 3.2405;
+    float Rate100 = 3.6237;
+    float Rate150 = 3.7171;
+    if (Unit >= 6) total += _min(Unit, 15) * Rate15;
+    if (Unit >= 16) total += _min(Unit - 15, 10) * Rate25;
+    if (Unit >= 26) total += _min(Unit - 25, 10) * Rate35;
+    if (Unit >= 36) total += _min(Unit - 35, 65) * Rate100;
+    if (Unit >= 101) total += _min(Unit - 100, 50) * Rate150;
+  } else {
+    float Rate150 = 3.2484;
+    float Rate400 = 4.2218;
+    float RateMore400 = 4.4217;
+    total += _min(Unit, 150) * Rate150;
+    if (Unit >= 151) total += _min(Unit - 150, 250) * Rate400;
+    if (Unit >= 401) total += (Unit - 400) * RateMore400;
+  }
+  total += Unit * (ft / 100);
+  return total;
+}
+void readWaterTemp(){
+  sensorsWatertemp.requestTemperatures();
+  temperatureC = sensorsWatertemp.getTempCByIndex(0);
+  Blynk.virtualWrite(V24, temperatureC);
+
+}
+void readDHT(){
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 2000U){
+    timepoint = currentMillis;
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+    if (isnan(h) || isnan(t)) {
+      t = 31;
+      h = -1;
+      //Serial.println(F("Failed to read from DHT sensor!"));
+      return;
+    }
+    Blynk.virtualWrite(V3, h);
+    Blynk.virtualWrite(V4, t);
+    /*Serial.print(F("Humidity: "));
+    Serial.print(h);
+    Serial.print(F("%  Temperature: "));
+    Serial.print(t);
+    Serial.println(F(" C "));*/
+   }
+};
+void PH(){
+  static float sum; // variable to store the sum of the readings
+  static int count; // variable to store the number of readings
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 100U){
+    timepoint = currentMillis;
+    float analogValue = analogRead(PHPIN);
+    voltagePH = analogValue/4095.0*3300; //read the voltage  
+    float slope = (7.0-4.0)/((neutralVoltage-1500)/3.0 - (acidVoltage-1500)/3.0); //two point: (_NautralVoltage,7.0),(_acidVoltage,4.0)
+    float intercept = 7.0 - slope*(neutralVoltage-1500)/3.0;
+    phValue = slope*(voltagePH-1500)/3.0+intercept; //y = k*x +b
+    //----------------------AFTER CALCULATE---------------------------
+    sum += phValue;// add the current reading to the sum
+    count++;// increment the count of readings
+    if (count == smoothFactor) {
+      // calculate the average of the readings
+      lastPH = sum / smoothFactor;
+      /*Serial.print("pH: ");
+      Serial.println(lastPH);*/
+      // reset the sum and count for the next set of readings
+      sum = 0;
+      count = 0;
+    }
+  }
+};
+void Ec(){
+  static float sum; // variable to store the sum of the readings
+  static int count; // variable to store the number of readings
+  static unsigned long timepoint = 0;
+  if(currentMillis - timepoint >= 200U){
+     timepoint = currentMillis;
+     tds.calTDS();
+     ecValue = tds.getEC()*0.001;
+     sum += ecValue;// add the current reading to the sum
+     count++;// increment the count of readings
+     if (count == smoothFactor) {
+      // calculate the average of the readings
+      lastEC = sum / smoothFactor;
+      // reset the sum and count for the next set of readings
+      sum = 0;
+      count = 0;
+      /*Serial.print("EC: ");
+      Serial.print(lastEC);
+      Serial.println(" ms/cm");*/
+     }
+  }
+}
+void waterRs485(){
+  int value;
+  uint8_t result = node.readHoldingRegisters(0,2); //function 03 
+  delay(50);
+  if (result == node.ku8MBSuccess) {
+    Serial.println("success: ");
+    /*value = node.getResponseBuffer(0);
+    Serial.println(value);*/
+    value = node.getResponseBuffer(1);
+    Serial.println(value/100);
+  } else {
+    Serial.print("error code: ");
+    Serial.println(result, HEX);
+  }
+}
+void checkFlow() {
+  static unsigned long lastCheckTime = 0;
+  static unsigned int lastPulseCount = 0;
+  
+  // Check if 5 minutes have elapsed since the last check
+  if (currentMillis - lastCheckTime >= 300000) {
+    // Store the current pulse count
+    unsigned int currentPulseCount = pulseCounterMainLine;
+    
+    // Check if the pulse count has not changed since the last check
+    if (currentPulseCount == lastPulseCount && flowwing == 1 && mainWaterPump == 1) {
+      // Do something here if there is no flow detected
+      // For example, you could turn off a pump or send an alert
+      flowwing = 0; 
+      lcdBlynkPrintError("checkFlow: Error");
+      // Reset the pulse count
+      pulseCounterMainLine = 0;
+    }
+    
+    // Store the current time and pulse count for the next check
+    lastCheckTime = currentMillis;
+    lastPulseCount = currentPulseCount;
+  }
+}
+//---------------------------------------------------------------------------------------------------
+void checkFlow2() {
+  static unsigned long lastCheckTime = 0;
+  static unsigned int lastPulseCount = 0;
+  
+  // Check if 5 minutes have elapsed since the last check
+  if (currentMillis - lastCheckTime >= 300000) {
+    // Store the current pulse count
+    unsigned int currentPulseCount = pulseCounterMainLine;
+    
+    // Calculate the flow rate in pulses per second
+    float flowRate = (float)(currentPulseCount - lastPulseCount) / ((float)(currentMillis - lastCheckTime) / 1000.0);
+    
+    // Calculate the maximum flow rate based on the sensor specifications
+    float maxFlowRate = 10.0; // Replace with your sensor's maximum flow rate
+    
+    // Check if the flow rate is greater than 20% of the maximum flow rate
+    if (flowRate >= maxFlowRate * 0.2) {
+      // Do something here if the flow rate is good
+      // For example, you could turn on a pump or reset a timer
+      
+      // Reset the pulse count
+      pulseCounterMainLine = 0;
+    }
+    
+    // Store the current time and pulse count for the next check
+    lastCheckTime = currentMillis;
+    lastPulseCount = currentPulseCount;
+  }
+}
+
+
