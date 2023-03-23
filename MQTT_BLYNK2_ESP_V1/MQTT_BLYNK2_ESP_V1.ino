@@ -44,15 +44,17 @@
 DHT dht(DHTPIN, DHTTYPE);
 TDS tds(ECPIN);
 ModbusMaster node;
+int water485;
 
 //-------------pH-----------------
+bool StatusOfPHsensor = 0;
 float voltagePH,phValue;
 float acidVoltage = 1810;
 float neutralVoltage = 1370;
-const int smoothFactor = 10;
 float lastPH;
 
 //--------------------------------
+float StatusOfECsensor;
 float ecValue,TdsValue,lastEC;
 
 
@@ -143,7 +145,6 @@ bool checkflow_ ;
 #define buttonPinMainWaterPump  0 // 15 สลับกับขา 0 เพราะ connected to on-board LED, must be left floating or LOW to enter flashing mode
 
 bool mainWaterPump = HIGH;
-bool mainWaterPump2 = HIGH;
 Bounce debouncer = Bounce(); // create obj
 
 swInput swAutoEC(pinSwitchEcAuto);
@@ -183,7 +184,6 @@ void IRAM_ATTR pulseCounter_plantingTrough(){
 void IRAM_ATTR pulseCounter_WaterTank(){
   pulse_WaterTank++;
 }
-
 void IRAM_ATTR pulseCounter_A_Solution(){
   pulse_A_Solution++;
 }
@@ -208,9 +208,10 @@ void setup() {
   timer.setInterval(2000L, sendSensor);
   timer.setInterval(10000L, lcdBlynkPrint);
   timer.setInterval(6000L, readWaterTemp);
-  timer.setInterval(50000L, waterRs485);
+  timer.setInterval(100000L, waterRs485);
   timer.setInterval(1000L, testprint);
   timer.setInterval(1000L, StirPump);
+  timer.setInterval(20000L, statusMqttMsg);
 
   sensorsWatertemp.begin();
 
@@ -242,11 +243,10 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
-  RTCfunction();
-  Mqttreconnect();
-  timer.run();
   reconnectBlynk();
-  controlWaterPump();//
+  timer.run();
+  RTCfunction();
+  controlWaterPump();
   functionLcd();
   EEPROMfunction();
   pzemRead();
@@ -256,6 +256,8 @@ void loop() {
   readDHT();
   PH();
   Ec();
+  Mqttreconnect();
+  checkFlow();
 }
 
 void testprint(){
@@ -339,12 +341,24 @@ void testprint(){
 void sendSensor(){ //to blynk
   //float voltage ,current ,power ,energy , frequency, pf;
   //Blynk.virtualWrite(V15, pf);
+  Blynk.virtualWrite(V1, phValue);
+  Blynk.virtualWrite(V2, ecValue);
 
   //test
   //readWaterTemp();
   
 };
 
+void statusMqttMsg(){
+  if (mqtt.connected() == true) {
+      mqtt.loop();
+      String dataJS = "{\"timeOnHH\":" + String(startHour) + ",\"timeOnMM\":" + String(startMinute) + ",\"timeOffHH\":" + String(stopHour) + ",\"timeOffMM\":" + String(stopMinute) + ",\"phlow\":" + String(phLow) + ",\"phHigh\":" + String(phHigh) + ",\"ecLow\":" + String(ecLow) + ",\"ecHigh\":" + String(ecHigh) +"}";
+      char json[150];
+      dataJS.toCharArray(json,dataJS.length()+1);
+      mqtt.publish("@msg/kmutnb/cs/smarthydroponic1/status", json);
+    } 
+
+}
 void Mqttreconnect(){
   static unsigned long timepoint = 0;
   if(currentMillis - timepoint >= 5000U){
@@ -382,7 +396,7 @@ void Mqttreconnect(){
     else {
       mqtt.loop();
       
-      String dataJS = "{\"temp\":" + String(temp_room) + ",\"hum\":" + String(hum_room) + ",\"ec\":" + String(ecValue) + ",\"ph\":" + String(phValue) + ",\"onhh\":" + String(startHour) + ",\"onmm\":" + String(startMinute) + ",\"onss\":" + String(startSecond) + "}";
+      String dataJS = "{\"temp\":" + String(temp_room) + ",\"hum\":" + String(hum_room) + ",\"ec\":" + String(ecValue) + ",\"ph\":" + String(phValue) + ",\"onhh\":" + String(startHour) + ",\"onmm\":" + String(startMinute) + ",\"onss\":" + String(startSecond) + ",\"water485\":" + String(water485) + ",\"waterTemp\":" + String(temperatureC) +"}";
       char json[150];
       dataJS.toCharArray(json,dataJS.length()+1);
       mqtt.publish("@msg/v1/devices/me/telemetry", json);
@@ -400,7 +414,6 @@ void Mqttreconnect(){
       char json2[100];
       dataJS2.toCharArray(json2,dataJS2.length()+1);
       mqtt.publish("@msg/v1/devices/me/telemetry2", json2);*/
-
     }
   }
 };
@@ -505,14 +518,14 @@ void initEEPROM() {
 };
 
 void callback(char* topic,byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
+  /*Serial.print("Message arrived [");
   Serial.print(topic);
-  Serial.print("]: ");
+  Serial.print("]: ");*/
   String msg;
   for (int i = 0; i < length; i++) {
     msg = msg + (char)payload[i];
   }
-   Serial.println(msg);
+   //Serial.println(msg);
   //float phLow,phHigh,ecLow,ecHigh;
   if (String(topic) == "@msg/eclow") { 
     ecLow = msg.toFloat();
@@ -746,6 +759,14 @@ void pzemRead(){
             Blynk.virtualWrite(V7, power);
             Blynk.virtualWrite(V8, energy);
             Blynk.virtualWrite(V9, frequency);
+            if (mqtt.connected() == true) {
+              mqtt.loop();
+              String dataJS = "{\"voltage\":" + String(voltage) + ",\"current\":" + String(current) + ",\"power\":" + String(power) + ",\"energy\":" + String(energy) + ",\"frequency\":" + String(frequency) + ",\"Unit\":" + String(Unit) + ",\"energyprice\":" + String(energyprice) +"}";
+              char json[150];
+              dataJS.toCharArray(json,dataJS.length()+1);
+              mqtt.publish("@msg/kmutnb/cs/smarthydroponic1/powerenergy", json);
+            } 
+
 
             // Print the values to the Serial console
             /*Serial.print("Voltage: ");      Serial.print(voltage);      Serial.println("V");
@@ -962,7 +983,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   static unsigned long lastSaveTimeMan;
   static unsigned long lastSaveTimeoOff;
   static unsigned long lastSaveTimeOffElseAuto;
-  const int relayOnTime = 2000;     // Relay on time in milliseconds
+  const int relayOnTime = 5000;     // Relay on time in milliseconds
   const int relayOffTime = 60000;   // Relay off time in milliseconds
 
   phAuto = swAutoPH.get_status();
@@ -1262,15 +1283,15 @@ void controlWaterPump(){ //switch mode --> Return state of relay
   if ( debouncer.fell() ) { 
     mainWaterPump  = !mainWaterPump ; // สลับสถานะ
     updatePumpMain = 0;
-    Serial.println("----------------------");
+    //Serial.println("----------------------");
   }
   
-    if (currentMillis - lastSaveTimeHigh >= 60000U  && mainWaterPump == 1 || mainWaterPump == 1 && updatePumpMain == 0) { // flowwing is status of health from water main flowing is good = 1 , bad = 0
+    if (currentMillis - lastSaveTimeHigh >= 120000U  && mainWaterPump == 1 || mainWaterPump == 1 && updatePumpMain == 0) { // flowwing is status of health from water main flowing is good = 1 , bad = 0
       relayRtu(15);
       mainWaterPump = 1;
       lastSaveTimeHigh = currentMillis;
       updatePumpMain = 1;
-      Serial.println("mainWaterPump: " + String(mainWaterPump));
+      //Serial.println("mainWaterPump: " + String(mainWaterPump));
     }
     //RTU off
     else if (currentMillis - lastSaveTimeLow >= 120000U  && mainWaterPump == 0 || mainWaterPump == 0 && updatePumpMain == 0) {
@@ -1483,7 +1504,6 @@ void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte 
     countSetError++;
     Serial.println("Time update to RTC module done" );
   }
-  
 }
 
 //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; 
@@ -1594,11 +1614,13 @@ void readDHT(){
     timepoint = currentMillis;
     hum_room = dht.readHumidity();
     temp_room = dht.readTemperature();
-    Blynk.virtualWrite(V4, hum_room);
-    Blynk.virtualWrite(V3, temp_room);
     if (isnan(hum_room) || isnan(temp_room)) {
-      Serial.println(F("Failed to read from DHT sensor!"));
+      //Serial.println(F("Failed to read from DHT sensor!"));
       return;
+    }
+    else{
+      Blynk.virtualWrite(V4, hum_room);
+      Blynk.virtualWrite(V3, temp_room);
     }
     /*Serial.print(F("Humidity: "));
     Serial.print(h);
@@ -1608,6 +1630,7 @@ void readDHT(){
    }
 };
 void PH(){
+  int smoothFactor = 10;
   static float sum; // variable to store the sum of the readings
   static int count; // variable to store the number of readings
   static unsigned long timepoint = 0;
@@ -1624,50 +1647,57 @@ void PH(){
     if (count == smoothFactor) {
       // calculate the average of the readings
       lastPH = sum / smoothFactor;
-      /*Serial.print("pH: ");
-      Serial.println(lastPH);*/
+      if(lastPH > 16){
+        StatusOfPHsensor = 0;
+      }
+      StatusOfPHsensor = 1; // return sensors pH is good
       // reset the sum and count for the next set of readings
       sum = 0;
       count = 0;
     }
+    else{
+    }
   }
 };
 void Ec(){
-  static float sum; // variable to store the sum of the readings
-  static int count; // variable to store the number of readings
-  static unsigned long timepoint = 0;
-  if(currentMillis - timepoint >= 200U){
+  int smoothFactor = 10;
+  static float storeOfEcValue; // variable to store the sum of the readings
+  static int count,sum; // variable to store the number of readings
+  static unsigned long timepoint = 0; 
+  if(currentMillis - timepoint >= 100U){
      timepoint = currentMillis;
      tds.calTDS();
      ecValue = tds.getEC()*0.001;
-     sum += ecValue;// add the current reading to the sum
+     storeOfEcValue += ecValue;// add the current reading to the sum
      count++;// increment the count of readings
      if (count == smoothFactor) {
       // calculate the average of the readings
       lastEC = sum / smoothFactor;
+      StatusOfECsensor = 1; // return sensors ec is good
       // reset the sum and count for the next set of readings
       sum = 0;
       count = 0;
-      /*Serial.print("EC: ");
-      Serial.print(lastEC);
-      Serial.println(" ms/cm");*/
+     }else{
+
      }
   }
 }
 void waterRs485(){
   int value;
   uint8_t result = node.readHoldingRegisters(0,2); //function 03 
-  delay(50);
+  //delay(50);
   if (result == node.ku8MBSuccess) {
     Serial.println("success: ");
     /*value = node.getResponseBuffer(0);
     Serial.println(value);*/
     value = node.getResponseBuffer(1);
-    Blynk.virtualWrite(V25,value);
-    Serial.println(value/100);
+    Blynk.virtualWrite(V25,value/100);
+    //Serial.println(value/100);
+    water485 = value/100;
   } else {
     Serial.print("error code: ");
     Serial.println(result, HEX);
+    
   }
 }
 void checkFlow() {
@@ -1697,7 +1727,16 @@ void checkFlow() {
     lastPulseCount = currentPulseCount;
   }
 }
+void fillWater(){
+  bool switch_fillwaterAuto = swManWaterIn.get_status();
+  if(switch_fillwaterAuto == 0){
+    //fill water
 
+  }else{
+    //not fill water
+  }
+
+}
 //---------------------------------------------------------------------------------------------------
 /*void checkFlow2() {
   static unsigned long lastCheckTime = 0;
