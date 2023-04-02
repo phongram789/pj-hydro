@@ -825,6 +825,7 @@ void pzemRead(){
 }
 
 void RTCfunction(){
+  static int errorReadRTC;
   static unsigned long lastSaveTime = 0;
   static unsigned long lastSaveTimeError;
   if (currentMillis - lastSaveTime >= 1000U) {
@@ -842,18 +843,21 @@ void RTCfunction(){
     Serial.print(':');
     Serial.print(now.second(), DEC);
     Serial.println();*/
-    int year = now.year();
-    //Serial.println("This year: " + String(year));
-    if(year  < 2023 || year  > 2100){
-      Rtcmodule = 0;
-      if (currentMillis - lastSaveTimeError >= 10000U) {
-        //Serial.println("RTC ERROR");
+    //int year = now.year();
+    Serial.println("This year: " + String(now.year()));
+    if(now.year()  < 2023 || now.year()  > 2100){
+      Rtcmodule = false;
+      if (currentMillis - lastSaveTimeError >= 10000U ) {
+        errorReadRTC++;
+        Serial.println("error RTC Module: " + String(errorReadRTC) + " time");
         requestTime();
         lastSaveTimeError = currentMillis;
+      }else{
+        return;
       }
     }
     else{
-      Rtcmodule = 1;
+      Rtcmodule = true;
       nowHour=now.hour();
       nowMinute=now.minute();
       nowSecond=now.second();
@@ -1500,45 +1504,34 @@ void requestTime(){
 BLYNK_WRITE(InternalPinRTC){
   const unsigned long DEFAULT_TIME = 1357041600; // Jan 1 2013
   unsigned long blynkTime = param.asLong();
-  int day1,month1,year1,weekday1,nowSecond1,nowMinute1,nowHour1; //18 02 2023 6
-  
+  int dayBlynk,monthBlynk,yearBlynk,weekdayBlynk,nowSecondBlynk,nowMinuteBlynk,nowHourBlynk; //18 02 2023 6
   if (blynkTime >= DEFAULT_TIME) 
   {
     setTime(blynkTime);
-    //Serial.println(blynkTime);
-    //Serial.println(String("RTC Server: ") + hour() + ":" + minute() + ":" + second());
-    //String currentDate = String(day()) + " " + month() + " " + year();
-    //Serial.println(currentDate);
-    //Serial.println(String("Day of Week: ") + weekday()); 
-    day1 = day();
-    month1 = month();
-    year1 = year();
-    weekday1 = weekday();
-    nowHour1 = hour();
-    nowMinute1 = minute();
-    nowSecond1 = second();
-
-    nowHour = nowHour1;
-    nowMinute = nowMinute1;
-    nowSecond = nowSecond1;
-    
-    settime(year1,month1,day1,weekday1,nowHour,nowMinute,nowSecond);
-    
+    dayBlynk = day();
+    monthBlynk = month();
+    yearBlynk = year();
+    weekdayBlynk = weekday();
+    nowHourBlynk = hour();
+    nowMinuteBlynk = minute();
+    nowSecondBlynk = second();
+    nowHour = nowHourBlynk; //กำหนดเวลานี้ไปใช้คำนวณเวลาเปิด-ปิดไฟปลูก
+    nowMinute = nowMinuteBlynk; //กำหนดเวลานี้ไปใช้คำนวณเวลาเปิด-ปิดไฟปลูก
+    nowSecond = nowSecondBlynk; //กำหนดเวลานี้ไปใช้คำนวณเวลาเปิด-ปิดไฟปลูก
+    settime(yearBlynk,monthBlynk,dayBlynk,weekdayBlynk,nowHourBlynk,nowMinuteBlynk,nowSecondBlynk);
   }
 }
 void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte Second){ 
   static int countSetError;
-  if(countSetError < 1 && Rtcmodule == 0){
-    Clock.setYear(Year);
-    Clock.setMonth(Month);
-    Clock.setDate(Date);
-    Clock.setDoW(DoW);
-    Clock.setHour(Hour);
-    Clock.setMinute(Minute);
-    Clock.setSecond(Second);
-    countSetError++;
-    Serial.println("Time update to RTC module done" );
-  }
+  Clock.setYear(Year);
+  Clock.setMonth(Month);
+  Clock.setDate(Date);
+  Clock.setDoW(DoW);
+  Clock.setHour(Hour);
+  Clock.setMinute(Minute);
+  Clock.setSecond(Second);
+  countSetError++;
+  Serial.println("Time update to RTC module done with " + String(countSetError) + " time.");
 }
 
 //GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4; 
