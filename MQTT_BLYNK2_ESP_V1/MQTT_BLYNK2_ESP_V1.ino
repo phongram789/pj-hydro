@@ -111,6 +111,8 @@ int stopHour,stopMinute,stopSecond;   //OFF HH:MM:SS
 int startTimeInSeconds;
 int stopTimeInSeconds;
 int currentTimeInSeconds;
+unsigned long milleHour; //
+int HourUpdateRTC; //
 
 bool growLigh1,growLigh2,growLigh3,growLigh4; //status on working of grow light
 
@@ -256,6 +258,7 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
+  wifiReconnect();
   reconnectBlynk();
   timer.run();
   RTCfunction();
@@ -273,6 +276,7 @@ void loop() {
   checkFlow();
   fillWater();
   changeWater(changeWaterState);
+  autoUpdateRTC();
 }
 
 void testprint(){
@@ -440,6 +444,7 @@ void Mqttreconnect(){
 
 void initWiFi() { 
   //192.127.2.34
+  //WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   lcd.clear();
   lcd.setCursor(0,0);
@@ -458,6 +463,18 @@ void initWiFi() {
   delay(2000);
 
 };
+void wifiReconnect(){
+  static unsigned long previousMillis = 0;
+  unsigned long interval = 30000;
+  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >=interval)) {
+    Serial.print(millis());
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    previousMillis = currentMillis;
+  }
+}
+
 void initEEPROM() { 
   if (!EEPROM.begin(EEPROM_SIZE))
   {
@@ -617,17 +634,20 @@ void callback(char* topic,byte* payload, unsigned int length) {
 
 
 void reconnectBlynk(){
+  static int errorTime = 0;
   static unsigned long timepoint = 0;
   if(currentMillis - timepoint >= 1000U){
     timepoint = currentMillis;
     if (!Blynk.connected() ) {
       statusBlynk = Blynk.connected();
-      
+      errorTime++;
       //Serial.println("Lost Blynk server connection");
       Blynk.connect();
     } else {
       // return something
+      Serial.println("Blynk connected");
       statusBlynk = Blynk.connected();
+      errorTime = 0;
     }
   }
 }
@@ -1894,6 +1914,23 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
     timepoint = 0;
   }
 
+}
+
+void autoUpdateRTC(){
+  milleHour = currentMillis;
+  if(milleHour >= 3600000){
+    HourUpdateRTC++;
+    milleHour = 0;
+  }else{
+    //return;
+  }
+  if(HourUpdateRTC >=24){
+    requestTime();
+    HourUpdateRTC = 0;
+    //update time with blynk server
+  }else{
+    return;
+  }
 }
 
 //---------------------------------------------------------------------------------------------------
