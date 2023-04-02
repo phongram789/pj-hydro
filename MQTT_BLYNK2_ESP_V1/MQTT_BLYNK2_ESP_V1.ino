@@ -171,6 +171,8 @@ swInput WaterLevel_Top(pinWaterLevel_Top);
 #define pinWaterLevel_Bottom 25
 swInput WaterLevel_Bottom(pinWaterLevel_Bottom);
 
+bool changeWaterState = false;
+
 WidgetLCD lcdBlynk(V16);
 
 //---------------------test station-----------------------
@@ -270,6 +272,7 @@ void loop() {
   Mqttreconnect();
   checkFlow();
   fillWater();
+  changeWater(changeWaterState);
 }
 
 void testprint(){
@@ -355,6 +358,7 @@ void sendSensor(){ //to blynk
   //Blynk.virtualWrite(V15, pf);
   Blynk.virtualWrite(V1, phValue);
   Blynk.virtualWrite(V2, ecValue);
+  Blynk.virtualWrite(V27, changeWaterState);
 
   //test
   //readWaterTemp();
@@ -764,7 +768,7 @@ void pzemRead(){
         } else {
             countError=0;
             
-            Unit = (energy/1000);
+            Unit = energy;
             if(ft == NULL){
               ft = 93.49;
             }
@@ -881,7 +885,7 @@ void EEPROMfunction(){
 };
 
 void controlEC(){ //switch mode --> codition of lv EC value --> Return state of relay
-  static unsigned long lastSaveTimeAuto;
+  //static unsigned long lastSaveTimeAuto;
   static unsigned long lastSaveTimeMan;
   static unsigned long lastSaveTimeoOff;
   static unsigned long lastSaveTimeOffAuto;
@@ -900,6 +904,7 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
   if((ecAuto == 1)&&(ecMan == 1)){ // swEcModeOff
     // Rtu relay off case 0
     stirPumpAB = LOW;
+    last_pump_time = 0;
     if(StateRelayOfEC != false){
       relayRtu(2);
       StateRelayOfEC = false;
@@ -912,7 +917,7 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
   }
   else if ((ecAuto == 0)&&(ecMan == 1)){ //swEcModeAuto
 
-    if(lastEC < ecLow && StatusOfECsensor == 1){ // pump AB solution to up ec value in water
+    if(lastEC < ecLow && StatusOfECsensor == 1 && changeWaterState == false){ // pump AB solution to up ec value in water
       AdjustEcState = 1;
     }
     else if((lastEC >= ecLow)&&(lastEC <= ecHigh) && StatusOfECsensor == 1 ){ // good Ec Value
@@ -965,7 +970,7 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
   else if ((ecAuto == 1)&&(ecMan == 0)){ //swEcModeMan
     // Rtu relay on
     stirPumpAB = HIGH;
-
+    last_pump_time = 0;
     if(StateRelayOfEC != true){
       relayRtu(1);
       StateRelayOfEC = true;
@@ -1001,6 +1006,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   // Select switch
   if((phAuto == 1)&&(phMan == 1)){ // swphModeOff
     stirPumpPh = LOW;
+    lastSaveTimeAuto = 0;
 
     // Rtu relay off case 0
     if(relayStatePH != LOW){
@@ -1019,7 +1025,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   }
   else if ((phAuto == 0)&&(phMan == 1)){ //swphModeAuto
     //-------------------- can add this condition in auto mode 
-    if((lastPH > phHigh)&&(AdjustEcState != 1) && StatusOfPHsensor == 1){ // pump pH solution to up pH value in water //anything else not auto ph with ec man
+    if((lastPH > phHigh)&&(AdjustEcState != 1) && StatusOfPHsensor == 1 && changeWaterState == false){ // pump pH solution to up pH value in water //anything else not auto ph with ec man
       controlPumpPH = 1;
     }
     else if((lastPH >= phLow)&&(lastPH <= phHigh) && StatusOfPHsensor == 1){ // good pH Value
@@ -1054,6 +1060,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
     }
     else{
       // Relay RTU Off 
+      lastSaveTimeAuto = 0;
       stirPumpPh = LOW;
       if(relayStatePH != LOW){
         Serial.print("relayState ph mode auto else: ");
@@ -1074,6 +1081,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   }
   else if ((phAuto == 1)&&(phMan == 0)){ //swphModeMan
   stirPumpPh = HIGH;
+  lastSaveTimeAuto = 0;
     // Rtu relay on
     if(relayStatePH != HIGH){
       Serial.print("relayState mode MAN: ");
@@ -1101,7 +1109,7 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   
 }
 
-void StirPump(){
+void StirPump(){ 
   static bool stateStirPump = LOW;
 
   if(stirPumpPh == LOW && stirPumpAB == LOW){
@@ -1545,25 +1553,31 @@ BLYNK_WRITE(V14){
 
 BLYNK_WRITE(V17){
   phLow = param.asFloat();
-  Serial.println(phLow);
+  //Serial.println(phLow);
 
 }
 BLYNK_WRITE(V18){
   phHigh = param.asFloat();
-  Serial.println(phHigh);
+  //Serial.println(phHigh);
 }
 BLYNK_WRITE(V19){
   ecLow = param.asFloat();
-  Serial.println(ecLow);
+  //Serial.println(ecLow);
 }
 BLYNK_WRITE(V20){
   ecHigh = param.asFloat();
-  Serial.println(ecHigh);
+  //Serial.println(ecHigh);
 }
 
 BLYNK_WRITE(V22){
   ft = param.asFloat();
-  Serial.println(ft);
+  //Serial.println(ft);
+}
+BLYNK_WRITE(V26){
+  checkflow_ = param.asInt();
+}
+BLYNK_WRITE(V27){
+  changeWaterState = param.asInt();
 }
 void lcdBlynkPrint(){
   //x = position symbol 0 -15 , y = line 0,1
@@ -1718,7 +1732,7 @@ void checkFlow() {
   static unsigned int lastPulseCount = 0;
   
   // Check if 5 minutes have elapsed since the last check
-  if (currentMillis - lastCheckTime >= 300000 && checkflow_ == true) {
+  if (currentMillis - lastCheckTime >= 300000 && checkflow_ == true && changeWaterState == false) {
     // Store the current pulse count
     unsigned int currentPulseCount = pulse_plantingTrough;
     
@@ -1732,6 +1746,7 @@ void checkFlow() {
       lcdBlynkPrintError("checkFlow: Error");
       // Reset the pulse count
       pulse_plantingTrough = 0; //pulse_plantingTrough ให้เป็น 0 เพื่อรออ่านค่าใหม่
+      //ส่วนของการแจ้งเตือน
     }
     flowwing = 1;// สถานะปกติ
     
@@ -1750,7 +1765,7 @@ void fillWater(){
   static int countTime = 0;
   static bool state_of_valve = false;
 
-  if(switch_fillwaterAuto == 0){
+  if(switch_fillwaterAuto == 0 && changeWaterState == false){
     //fill water
     if(currentMillis - timepoint >= 10000U && switch_WaterLevel_Top == 0){
       timepoint = currentMillis; //store timepoint
@@ -1783,6 +1798,7 @@ void fillWater(){
 
   }else{
     //not fill water
+    countTime = 0;
     // if !low
     if(state_of_valve == true){
       //rtu off
@@ -1802,43 +1818,80 @@ void fillWater(){
 /*BLYNK_WRITE(){
   change_state = param.asInt();
 }*/
-void changeWater(bool changeWater_state){
+void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWater--State = 1 
   static unsigned long last_time = 0;
   const unsigned long interval = 1000; // 5 seconds
   static int countTime,countTimeEmpty;
   static unsigned long timepoint = 0;
-  static unsigned long timepoint_empty = 0;
+  static unsigned long timepoint_empty,timepoint_waiting,timepoint_fill,timepoint_release,timepoint_empty_plues;
   bool switch_WaterLevel_Top = WaterLevel_Top.get_status();
   bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status();
-  bool release_water = false;
-  bool refill_water = false; 
-  if(changeWater_state == 1){  //changing water and then fill water
+  static bool filling = false;
 
-    if (switch_WaterLevel_Top == 0 && switch_WaterLevel_Bottom == 0 || switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 0) { // check if water level is at the top and not at the bottom
+  if(changeWater_state == 1){  //changing water and then fill water
+    if (switch_WaterLevel_Top == 0 && switch_WaterLevel_Bottom == 0 || switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 0 && filling == false) { // check if water level is at the top and not at the bottom
+      if(countTimeEmpty != 0){
+        changeWaterState = 0;
+        Blynk.virtualWrite(V27, changeWaterState);
+      }else{}
       if(currentMillis - timepoint >= 1000U){
         timepoint = currentMillis; //store timepoint
         countTime++; //count 1 = 10 sec.
-      }
+        countTimeEmpty = 0;
+        //Serial.println("countTime : "+String(countTime));
+        }
     }
     else if(switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 1){
       if(currentMillis - timepoint_empty >= 1000U){
         timepoint_empty = currentMillis; //store timepoint
         countTimeEmpty++; //count 1 = 10 sec.
+        countTime = 0;
+        //Serial.println("countTimeEmpty : "+String(countTimeEmpty));
       }
     }
     else{
+      if(currentMillis - timepoint_empty_plues >= 1000U){
+        timepoint_empty_plues = currentMillis; //store timepoint
+        countTimeEmpty++;
+      }
     }
-
+    //switch_WaterLevel_Top == 0 เต็ม 1 คือไม่เต็ม
     if(countTime > 60 && switch_WaterLevel_Top == 0 && switch_WaterLevel_Bottom == 0 || countTime > 60 && switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 0){
-      //release water
-    }else{
-      //not release water
+      //release water ปล่อยน้ำ
+      filling = false;
+      if(currentMillis - timepoint_release >= 1000U){
+        timepoint_release = currentMillis; //store timepoint
+        //Serial.println("release water");
+      }
+
     }
-
-
-
+    else if(countTimeEmpty > 60 && switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 1 || countTimeEmpty > 60 && switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 0){
+      //fill water เติมน้ำ
+      filling = true;
+      if(currentMillis - timepoint_fill >= 1000U){
+        timepoint_fill = currentMillis; //store timepoint
+        Serial.println("fill water");
+        Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+      }
+    }
+    else{
+      //not release water
+      if(currentMillis - timepoint_waiting >= 1000U){
+        timepoint_waiting = currentMillis; //store timepoint
+        Serial.println("not release water n not fill water");
+        Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+        Serial.println("countTime : "+String(countTime));
+      }
+    }
   }else{
     // not change
+    changeWaterState = false;
+    filling = false;
+    countTimeEmpty = 0;
+    countTime=0;
+    
+    timepoint_empty = 0;
+    timepoint = 0;
   }
 
 }
