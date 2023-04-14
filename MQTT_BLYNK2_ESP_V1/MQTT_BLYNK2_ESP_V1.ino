@@ -198,10 +198,6 @@ int pulse_B_Solution;
 int pulse_phDownSolution; //ตัวแปรสำหรับเก็บจำนวนพัลส์
 
 
-
-
-
-
 void IRAM_ATTR pulseCounter_plantingTrough(){
   pulse_plantingTrough++;
 }
@@ -247,9 +243,11 @@ void setup() {
   timer.setInterval(100000L, waterRs485);
   timer.setInterval(1000L, StirPump);
   timer.setInterval(20000L, statusMqttMsg);
-  timer.setInterval(2000L, PRINT);
+  timer.setInterval(9000L, PRINT);
   timer.setInterval(30000L, release_valve);
   timer.setInterval(30000L, refill_valve);
+  timer.setInterval(1000L, empty_check_Water);
+
 
   sensorsWatertemp.begin();
 
@@ -283,7 +281,6 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentMillis = millis();
-  check_Water();
   wifiReconnect();
   reconnectBlynk();
   timer.run();
@@ -299,29 +296,34 @@ void loop() {
   PH();
   Ec();
   Mqttreconnect();
-  //checkFlow();
-  //fillWater();
+  checkFlow();
+  fillWater();
   //changeWater(changeWaterState);
   autoUpdateRTC();
-  //drainWater();
+  drainWater();
 }
 void PRINT(){
   /*Serial.println("ecAuto : " + String(ecAuto));
   Serial.println("ecMan : " + String(ecMan));*/ // read switch is good
-  Serial.println("phAuto : " + String(phAuto));
-  Serial.println("phMan : " + String(phMan));
+  /*Serial.println("phAuto : " + String(phAuto));
+  Serial.println("phMan : " + String(phMan));*/ //read switch is good
   /*Serial.println("GLAuto : " + String(GLAuto));
   Serial.println("GLMan : " + String(GLMan));*/ //switch is good
 
-
+  Serial.println("changeWaterState : " + String(changeWaterState));
+  Serial.println("drain_state : " + String(drain_state));
+  //Serial.println("empty_tank : " + String(empty_tank));
+  
+  
+  //Serial.println("mainWaterPump : " + String(mainWaterPump));
 
   /*bool switch_fillwaterAuto = swManWaterIn.get_status();
   Serial.println("switch_fillwaterAuto : " + String(switch_fillwaterAuto));*/ // read switch is good
 
-  /*bool switch_WaterLevel_Top = WaterLevel_Top.get_status(); 
+  bool switch_WaterLevel_Top = WaterLevel_Top.get_status(); 
   bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status();
   Serial.println("switch_WaterLevel_Top : " + String(switch_WaterLevel_Top));
-  Serial.println("switch_WaterLevel_Bottom : " + String(switch_WaterLevel_Bottom));*/ //is good
+  Serial.println("switch_WaterLevel_Bottom : " + String(switch_WaterLevel_Bottom)); //is good
 
   /*Serial.println("pulse_phDownSolution : " + String(pulse_phDownSolution));
   Serial.println("pulse_A_Solution : " + String(pulse_A_Solution));
@@ -334,6 +336,7 @@ void sendSensor(){ //to blynk
   //Blynk.virtualWrite(V15, pf);
   Blynk.virtualWrite(V1, phValue);
   Blynk.virtualWrite(V2, ecValue);
+  Blynk.virtualWrite(V32, flowwing);
   
   //Blynk.virtualWrite(V, WaterLevel_Top.get_status());
 
@@ -1188,8 +1191,8 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
       //Serial.println("sw man on");
     }
   }
-  else if ((GLAuto == 0)&&(GLMan == 1)){ //sw grow light Mode Auto *timer*
-  //note GrowLight1Control1,GrowLight1Control2,GrowLight1Control3,GrowLight1Control4;
+  //AUTO MODE
+  else if ((GLAuto == 0)&&(GLMan == 1)){ 
 
     startTimeInSeconds = abs((startHour * 60 * 60) + (startMinute * 60) + startSecond);
     stopTimeInSeconds = abs((stopHour * 60 * 60) + (stopMinute * 60) + stopSecond);
@@ -1202,9 +1205,7 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
       timeonGL = 0;
     }
 
-  if (currentMillis - lastSaveTimeoAuto >= 300000U || updateGl == 0) {
-    lastSaveTimeoAuto = currentMillis;
-    updateGl = 1;
+    
     if(timeonGL == 1 && GrowLightControl1 == 1 && growLigh1 == LOW){
       relayRtu(7);
       growLigh1 = HIGH;
@@ -1215,37 +1216,67 @@ void controlGrowLight(){ //switch mode --> timer --> Return state of relay
       relayRtu(8);
       growLigh1 = LOW;
       Blynk.virtualWrite(V10, growLigh1);
+    }else if(timeonGL == 0){
+      if(growLigh1 == HIGH){
+        relayRtu(8);
+        growLigh1 = LOW;
+        Blynk.virtualWrite(V10, growLigh1);
+      }
     }
 
+    //------------------------
     if(timeonGL == 1 && GrowLightControl2 == 1 && growLigh2 == LOW){
       relayRtu(9);
       growLigh2 = HIGH;
+      //You can change button labels from hardware with
       Blynk.virtualWrite(V11, growLigh2);
-    }else if(timeonGL == 1 && GrowLightControl2 == 1 && growLigh2 == HIGH){
+    }
+    else if(timeonGL == 1 && GrowLightControl2 == 0 && growLigh2 == HIGH){
       relayRtu(10);
       growLigh2 = LOW;
       Blynk.virtualWrite(V11, growLigh2);
+    }else if(timeonGL == 0){
+      if(growLigh2 == HIGH){
+        relayRtu(10);
+        growLigh2 = LOW;
+        Blynk.virtualWrite(V11, growLigh2);
+      }
     }
 
     if(timeonGL == 1 && GrowLightControl3 == 1 && growLigh3 == LOW){
       relayRtu(11);
       growLigh3 = HIGH;
       Blynk.virtualWrite(V12, growLigh3);
-    }else if(timeonGL == 1 && GrowLightControl3 == 1 && growLigh3 == HIGH){
+    }else if(timeonGL == 1 && GrowLightControl3 == 0 && growLigh3 == HIGH){
       relayRtu(12);
       growLigh3 = LOW;
       Blynk.virtualWrite(V12, growLigh3);
+    }else if(timeonGL == 0){
+      if(growLigh3 == HIGH){
+        relayRtu(12);
+        growLigh3 = LOW;
+        Blynk.virtualWrite(V12, growLigh3);
+      }
     }
+    
     if(timeonGL == 1 && GrowLightControl4 == 1 && growLigh4 == LOW){
       relayRtu(13);
       growLigh4 = HIGH;
       Blynk.virtualWrite(V13, growLigh4);
-    }else if(timeonGL == 1 && GrowLightControl4 == 1 && growLigh4 == HIGH){
+    }else if(timeonGL == 1 && GrowLightControl4 == 0 && growLigh4 == HIGH){
       relayRtu(14);
       growLigh4 = LOW;
       Blynk.virtualWrite(V13, growLigh4);
+    }else if(timeonGL == 0){
+      if(growLigh4 == HIGH){
+        relayRtu(14);
+        growLigh4 = LOW;
+        Blynk.virtualWrite(V13, growLigh4);
+      }
+
     }
-  }
+    
+  
 
   }
   else if ((GLAuto == 1)&&(GLMan == 0)){ //sw grow light Mode Man
@@ -1295,29 +1326,28 @@ void controlWaterPump(){ //switch mode --> Return state of relay
   static unsigned long lastSaveTimeLow;
   static bool pump_state = LOW;
   debouncer.update();
-
+  
   // กำหนดเงื่อนไขให้โค้ดโปรแกรมในวงเล็บปีกกาทำงานเมื่อสถานะปุ่มกดเปลี่ยนจาก HIGH เป็น LOW โดยเช็คจากฟังก์ชั่น fell()
   // หากต้องการเช็คสถานะจาก LOW เป็น HIGH ให้แทนที่ฟังก์ชั่น fell() ด้วยฟังก์ชั่น rose()
   if ( debouncer.fell() ) { 
     mainWaterPump  = !mainWaterPump ; // สลับสถานะ
-    Blynk.virtualWrite(V14,mainWaterPump);
-    //Serial.println("----------------------");
+    Serial.println("-----------switch pump con box-----------");
   }
-  
-  if (mainWaterPump == 1 && changeWaterState == false && empty_tank == false && drain_state == false) { // flowwing is status of health from water main flowing is good = 1 , bad = 0
+  //on
+  if (mainWaterPump == 1 && changeWaterState == false && empty_tank == false && drain_state == false ) { // flowwing is status of health from water main flowing is good = 1 , bad = 0
       if(pump_state == LOW){
         relayRtu(15);
         pump_state = HIGH;
-        mainWaterPump = 1;
+        Blynk.virtualWrite(V14,mainWaterPump);
       }
       //Serial.println("mainWaterPump: " + String(mainWaterPump));
   }
-    //RTU off
+  //off
   else{
     if(pump_state == HIGH){
       relayRtu(16);
       pump_state = LOW;
-      mainWaterPump = 0;
+      Blynk.virtualWrite(V14,mainWaterPump);
     }
   }
 }
@@ -1346,7 +1376,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU2, 8);
-      Serial.println("case 3:");
+      Serial.println("pump pH on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1355,7 +1385,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(OFF_RTU2, 8);
-      Serial.println("case 4:");
+      Serial.println("pump pH off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1365,7 +1395,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU3, 8);
-      Serial.println("case 5:");
+      Serial.println("stir pump on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1375,7 +1405,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       //relay 50-100
       Serial2.write(OFF_RTU3, 8);
       delay(50);
-      Serial.println("case 6:");
+      Serial.println("stir pump off");
       Serial2.flush();
       //Serial2.flushReceive();
       break;
@@ -1384,7 +1414,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU16, 8);
-      Serial.println("case 7:");
+      Serial.println("gl 1 on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1393,7 +1423,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(OFF_RTU16, 8);
-      Serial.println("case 8:");
+      Serial.println("gl 1 off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1402,7 +1432,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU15, 8);
-      Serial.println("case 9:");
+      Serial.println("gl 2 on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1411,7 +1441,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(OFF_RTU15, 8);
-      Serial.println("case 10:");
+      Serial.println("gl 2 off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1420,7 +1450,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU14, 8);
-      Serial.println("case 11:");
+      Serial.println("gl 3 on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1429,7 +1459,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(OFF_RTU14, 8);
-      Serial.println("case 12:");
+      Serial.println("gl 3 off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1438,7 +1468,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(ON_RTU13, 8);
-      Serial.println("case 13:");
+      Serial.println("gl 4 on");
       delay(50);
       Serial2.flush();
      // Serial2.flushReceive();
@@ -1447,7 +1477,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
       
       //relay 50-100
       Serial2.write(OFF_RTU13, 8);
-      Serial.println("case 14:");
+      Serial.println("gl 4 off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1456,7 +1486,7 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
     case 15: //sending conmand relay on คำสั่งปิดปั๊มน้ำขึ้นรางปลูก
       //relay 50-100
       Serial2.write(ON_RTU12, 8);
-      Serial.println("case 15:");
+      Serial.println("water pump on");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
@@ -1464,44 +1494,44 @@ void relayRtu(int condition){ // manage state of relay on/off ch.
     case 16: //sending conmand relay off  คำสั่งปิดปั๊มน้ำขึ้นรางปลูก
       //relay 50-100
       Serial2.write(OFF_RTU12, 8);
-      Serial.println("case 16:");
+      Serial.println("water pump off");
       delay(50);
       Serial2.flush();
       //Serial2.flushReceive();
       break;
     case 17: //คำสั่งเปิดวาล์วน้ำเข้า ch 4 on
       Serial2.write(ON_RTU4, 8);
-      Serial.println("case 17:");
+      Serial.println("refill valve on");
       delay(50);
       Serial2.flush();
       break;
     case 18: //คำสั่งปิดวาล์วน้ำเข้า ch 4 off
       Serial2.write(OFF_RTU4, 8);
-      Serial.println("case 18:");
+      Serial.println("refill valve off");
       delay(50);
       Serial2.flush();
       break;
     case 19: //คำสั่งเปิดวาล์วน้ำออก ch 5 on
       Serial2.write(ON_RTU5, 8);
-      Serial.println("case 19:");
+      Serial.println("releast valve on");
       delay(50);
       Serial2.flush();
       break;
     case 20: //คำสั่งปิดวาล์วน้ำออก ch 5 off
       Serial2.write(OFF_RTU5, 8);
-      Serial.println("case 20:");
+      Serial.println("releast valve off");
       Serial2.flush();
       delay(50);
       break;
     case 21: //คำสั่งเปิดวาล์วน้ำกั้นทางออก ch 6 on
       Serial2.write(ON_RTU6, 8);
-      Serial.println("case 21:");
+      Serial.println("cut water line on");
       delay(50);
       Serial2.flush();
       break;
     case 22: //คำสั่งปิดวาล์วน้ำกั้นทางออก ch 6 off
       Serial2.write(OFF_RTU6, 8);
-      Serial.println("case 22:");
+      Serial.println("cut water line off");
       delay(50);
       Serial2.flush();
       break;
@@ -1567,9 +1597,9 @@ BLYNK_WRITE(V13){
   Serial.println(GrowLightControl4);
   updateGl = 0;
 }
-BLYNK_WRITE(V14){
+BLYNK_WRITE(V14){ //main pump
   mainWaterPump = param.asInt();
-  Serial.println(mainWaterPump);
+  Serial.println("pump blynk :" + String(mainWaterPump));
 }
 
 BLYNK_WRITE(V17){
@@ -1779,30 +1809,41 @@ void waterRs485(){
   }
 }
 void checkFlow() {
-  static unsigned long lastCheckTime = 0;
+  static unsigned long lastCheckTime1 = 0;
   static unsigned int lastPulseCount = 0;
-  
+  static unsigned long currentMillcheckFlow = 0;
   // ตรวจสอบว่าเวลาผ่านไปห้านาทีหลังการตรวจสอบครั้งล่าสุดหรือไม่โดยที่ checkflow_ เป็นจริง และ changeWaterState การเปลี่ยนน้ำเป็นเท็จ
-  if (currentMillis - lastCheckTime >= 300000 && checkflow_ == true && changeWaterState == false && empty_tank == false && drain_state == false) {
+  if (currentMillis - lastCheckTime1 >= 300000 && checkflow_ == true && changeWaterState == false && empty_tank == false && drain_state == false && mainWaterPump == HIGH) {
     unsigned int currentPulseCount = pulse_plantingTrough; // เก็บจำนวนพัลส์ปัจจุบัน
+
     if (currentPulseCount == lastPulseCount && mainWaterPump == 1) { // ตรวจสอบว่าจำนวนพัลส์ไม่ได้เปลี่ยนแปลงตั้งแต่การตรวจสอบครั้งล่าสุดหรือไม่
+      Serial.println("currentPulseCount-lastPulseCount = : " +String(currentPulseCount-lastPulseCount));
       flowwing = 0; //อัพเดทสถานะว่าไม่มีการไหลว่าเท่ากับ 0 หรือไม่มีการไหลเ
       mainWaterPump = 0; //สั่งปิดปั๊มน้ำรางปลูก
       lcdBlynkPrintError("checkFlow: Error");
+      Serial.println("checkFlow: Error");
       // Reset the pulse count
       pulse_plantingTrough = 0; //pulse_plantingTrough ให้เป็น 0 เพื่อรออ่านค่าใหม่
-
+      lastCheckTime1 = 0; // reset time
       //String text = "{}" //
       //notifyingPubMqtt(text); //ส่งชุดข้อความแจ้งเตือนไปยังฟังก์ชันแจ้งเตือนด้วยโพโตคอล Mqtt
     }
     //เมื่อสถานะการไหลเป็นปกติ flowwing เป็นจริง
-    flowwing = 1;
-    
+    else{
+      flowwing = 1;
+      Serial.println("checkFlow good --------------------------------------");
+      Serial.println("currentPulseCount-lastPulseCount = : " +String(currentPulseCount-lastPulseCount));
+    }
+
     // เก็บเวลาและจำนวนพัลส์ปัจจุบันเพื่อใช้ตรวจสอบครั้งต่อไป
-    lastCheckTime = currentMillis;
-    lastPulseCount = currentPulseCount;
+    lastCheckTime1 = currentMillis;
+    lastPulseCount = pulse_plantingTrough;
   }else{
     //ไม่ทำอะไรเมื่อยังไม่ถึงเวลา
+    if(checkflow_ == false ){
+      lastCheckTime1 = 0;
+      currentMillcheckFlow = 0;
+    }
     return;
   }
 }
@@ -1811,31 +1852,31 @@ void fillWater(){
   bool switch_WaterLevel_Top = WaterLevel_Top.get_status(); //เป็นการอ่านสถานะของเซ็นเซอร์ระดับน้ำที่อยู่ในถังน้ำด้านบน โดยค่าที่ได้จะเป็นจริง (true) เมื่อระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์ และเป็นเท็จ (false) เมื่อระดับน้ำอยู่เหนือเซ็นเซอร์
   bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status(); //เป็นการอ่านสถานะของเซ็นเซอร์ระดับน้ำที่อยู่ในถังน้ำด้านล่าง โดยค่าที่ได้จะเป็นจริง (true) เมื่อระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์ และเป็นเท็จ (false) เมื่อระดับน้ำอยู่เหนือเซ็นเซอร์
   static unsigned long timepoint_count = 0; //ตัวแแปรสำหรับเก็บเวลาที่จะนับเมื่อเซ็นเซอร์ลูกอยู่ต่ำกว่าเซ็นเซอร์ และ สวิตช์เติมน้ำอัตโนมัติเปิดอยู่
-  static unsigned long timepoint_Recheck = 0; //ตัวแแปรสำหรับเก็บเวลาหรับเช็คการปิดวาล์ว
   static unsigned long timepoint_Store_water = 0; //ตัวแปรเก็บเวลาสำหรับใช้คำนวณน้ำที่ไหลผ่าน Water flow sensor 
   static int countTime = 0; //ตัวแแปรสำหรับเก็บเวลา 
-  static bool state_of_valve = false; //ตัวแปลเก็บสถานะของวาล์วที่ใช้สำหรับเปิดให้น้ำไหลผ่านเข้าถังน้ำ
+  static bool state_of_valve = LOW; //ตัวแปลเก็บสถานะของวาล์วที่ใช้สำหรับเปิดให้น้ำไหลผ่านเข้าถังน้ำ
 
   
   if(switch_fillwaterAuto == 0 && changeWaterState == false && drain_state == false ){ //ถ้า switch_fillwaterAuto เท่ากับ 0 คือสวิตช์เติมน้ำอัตโนมัติเปิดอยู่ และ changeWaterState เท่ากับเท็จ หรือไม่ได้มีการเปลี่ยนน้ำอยู่ จะเข้าเงื่อนไข
-    if(currentMillis - timepoint_count >= 10000U && switch_WaterLevel_Top == 1){  //นับเวลาทุกๆ 10 วิ และ ค่าที่ได้จะเป็น 1 หรือระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์
+    if(currentMillis - timepoint_count >= 1000U && switch_WaterLevel_Top == 1){  //นับเวลาทุกๆ 10 วิ และ ค่าที่ได้จะเป็น 1 หรือระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์
       timepoint_count = currentMillis; //เป็นการเก็บเวลาที่ระบบทำงานไปแล้ว
       countTime++; //นับเวลาที่ระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์
+      Serial.println("time fill :"+String(countTime));
     }else{
-      //ถ้าไม่เข้าเงื่อนไขแรกจะรีเซ็นเวลาที่ระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์ให้เท่ากับ 0
-      countTime = 0 ;
+      
     }
 
     if(countTime >= 6 && switch_WaterLevel_Top == 1 ){ // ถ้าเวลาที่นับว่าระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์มากกว่าหรือเท่ากับ 6 หรือ 60 วิ จะทำการเปิดวาล์วเติมน้ำ
       //turn on valve to fill water in tank
-      if(state_of_valve == false){ //ถ้า state_of_valve เป็นเท็จ หรือวาลว์ยังไม่ได้เปิด จะทำการเปิดให้น้ำไหลเติมถังน้ำ
+      if(state_of_valve == LOW){ //ถ้า state_of_valve เป็นเท็จ หรือวาลว์ยังไม่ได้เปิด จะทำการเปิดให้น้ำไหลเติมถังน้ำ
         pulse_WaterTank = 0;  // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
         //rtu on  //สั่งการทำงานให้วาล์วเปิด
         relayRtu(17);
-        state_of_valve = true;  //เปลี่ยนสถานะของวาล์วเป็นจริง
+        state_of_valve = HIGH;  //เปลี่ยนสถานะของวาล์วเป็นจริง
         refill_valve_fill = HIGH;
       }
       if(currentMillis - timepoint_Store_water >= 5000U ){ // ทุกๆ 5 วิ จะทำการจัดเก็บจำนวนน้ำที่ไหลผ่านเข้าถัง
+        Serial.println("waterAmount: " + String(waterAmount));
         timepoint_Store_water = currentMillis; //จัดเก็บเวลาใช้สำหรับรอบต่อไป
         waterAmount += pulse_WaterTank/7.5; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตร
         pulse_WaterTank = 0; // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
@@ -1843,33 +1884,24 @@ void fillWater(){
     }
     else{
       //turn off valve to fill water in tank
-      if(state_of_valve == true){ //ถ้า state_of_valve เป็นจริง หรือวาลว์ยังเปิดอยู่ จะทำการปิดวาล์วเพื่อหยุดเติมน้ำ
+      if(state_of_valve == HIGH){ //ถ้า state_of_valve เป็นจริง หรือวาลว์ยังเปิดอยู่ จะทำการปิดวาล์วเพื่อหยุดเติมน้ำ
         //rtu off //สั่งการทำงานให้วาล์วปิด
         relayRtu(18);
         refill_valve_fill = LOW;
-        state_of_valve = false; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
+        state_of_valve =  LOW; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
         waterAmount += pulse_WaterTank/7.5; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตร
         pulse_WaterTank = 0; // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
+        countTime = 0 ; //ถ้าไม่เข้าเงื่อนไขแรกจะรีเซ็นเวลาที่ระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์ให้เท่ากับ 0
       }
     }
   }else{ //ถ้าสวิตช์ไม่ได้เปิดให้เติมน้ำอัตโนมัตระบบจะตรวจสอบสถานะวาล์วถ้าเปิดอยู่จะสั่งให้ปิด
 
-    if(state_of_valve == true){
+    if(state_of_valve == HIGH){
       //rtu off  //สั่งการทำงานให้วาล์วปิด
       relayRtu(18);
-      state_of_valve = false; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
+      state_of_valve = LOW; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
       refill_valve_fill = LOW;
     }
-
-
-    if(currentMillis - timepoint_Recheck >= 200000U){
-      timepoint_Recheck == currentMillis;
-      //rtu off
-      relayRtu(18);
-      refill_valve_fill = LOW;
-      state_of_valve = false;
-    }
-    
   }
 }
 
@@ -2036,9 +2068,9 @@ BLYNK_WRITE(V31){
 }
 
 
-void check_Water(){
-    static bool switch_WaterLevel_Top = WaterLevel_Top.get_status();
-    static bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status();
+void empty_check_Water(){
+    bool switch_WaterLevel_Top = WaterLevel_Top.get_status();
+    bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status();
     if(switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom  == 1 ){
       empty_tank = true;
     }else{
@@ -2060,6 +2092,8 @@ void drainWater(){
         release_valve_drain = LOW;
       } 
       drain_state = 0;
+      Blynk.virtualWrite(V31, drain_state);
+
     }else{
       // on valve
       if(release_valve == LOW){
