@@ -18,7 +18,6 @@ class TDS{
       t_pin = pin;
     }
     void calTDS(){
-      //analogValue = analogRead(t_pin);
       analogValue = analogRead(t_pin);
       voltage =analogValue/adcRange*aref;
       ecValue = (133.42*voltage*voltage*voltage - 255.86*voltage*voltage + 857.39*voltage)*kValue;
