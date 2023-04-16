@@ -441,11 +441,16 @@ void Mqttreconnect(){
 void initWiFi() { 
   //192.127.2.34
   //WiFi.mode(WIFI_STA);
+  static int count_time = 0;
   WiFi.begin(ssid, password);
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Connecting to WiFi..");
   while (WiFi.status() != WL_CONNECTED) {
+    count_time++;
+    if(count_time > 30){
+      ESP.restart();
+    }
     Serial.print('.');
     delay(1000);
   }
@@ -2010,7 +2015,6 @@ void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte 
   Clock.setSecond(Second);
   countSetError++;
   Serial.println("Time update to RTC module done with " + String(countSetError) + " time.");
-  //notifyingPubMqtt(String dataJS);
 }
 
 BLYNK_WRITE(V10){
@@ -2147,6 +2151,7 @@ void readDHT(){
     Serial.println(F(" C "));*/
    }
 };
+
 void PH(){
   int smoothFactor = 10; // ตัวแปร smoothFactor ใช้เก็บจำนวนการอ่านอินพุตที่จะใช้ในการหาค่าเฉลี่ย
   static float sum; // ตัวแปร sum ใช้เก็บผลรวมของอินพุตทั้งหมด
@@ -2355,15 +2360,21 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
 
   if(changeWater_state == 1){  //changing water and then fill water
     if (switch_WaterLevel_Top == 0 && switch_WaterLevel_Bottom == 0 || switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 0 && filling == false) { // check if water level is at the top and not at the bottom
+      
       if(countTimeEmpty != 0){
         changeWaterState = 0;
-        Blynk.virtualWrite(V27, changeWaterState);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("changed");
 
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "changed");
+
+        Blynk.virtualWrite(V27, changeWaterState);
         String text  = "{\"change\":\"done\"}";
         notifyingPubMqtt(text);
+      }
 
-        //mtqq
-      }else{}
       if(currentMillis - timepoint >= 1000U){
         timepoint = currentMillis; //store timepoint
         countTime++; //count 1 = 10 sec.
@@ -2400,7 +2411,10 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
         Serial.println("release water");
         lcd.clear();
         lcd.setCursor(0,0);
-        lcd.print("release water");
+        lcd.print("Releasing water");
+
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "Releasing water");
       }
 
     }
@@ -2417,6 +2431,12 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
         timepoint_fill = currentMillis; //store timepoint
         Serial.println("fill water");
         Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("filling the tank");
+
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "filling the tank");
       }
     }
     else{
@@ -2439,6 +2459,12 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
         Serial.println("not release water n not fill water");
         Serial.println("countTimeEmpty : "+String(countTimeEmpty));
         Serial.println("countTime : "+String(countTime));
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("waiting");
+
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "waiting");
       }
     }
   }else{
@@ -2513,9 +2539,16 @@ BLYNK_WRITE(V31){
 void empty_check_Water(){
     bool switch_WaterLevel_Top = WaterLevel_Top.get_status();
     bool switch_WaterLevel_Bottom = WaterLevel_Bottom.get_status();
+    static int count = 0;
     if(switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom  == 1 ){
-      empty_tank = true;
+      count++;
+      if(count > 6){
+        empty_tank = true;
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "Tank is empty");
+      }
     }else{
+      count = 0;
       empty_tank = false;
     }
 }
@@ -2531,6 +2564,9 @@ void drainWater(){
       lcd.clear();
       lcd.setCursor(0,0);
       lcd.print("Drained");
+
+      lcdBlynk.clear();
+      lcdBlynk.print(0, 0, "Drained");
       
       if(release_valve == HIGH){
         //RTU OFF
@@ -2551,6 +2587,8 @@ void drainWater(){
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.print("Draining water...");
+        lcdBlynk.clear();
+        lcdBlynk.print(0, 0, "Draining water...");
        }
       
       if(release_valve == LOW){
