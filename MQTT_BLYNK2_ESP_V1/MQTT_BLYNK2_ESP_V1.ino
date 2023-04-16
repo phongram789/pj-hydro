@@ -912,16 +912,17 @@ void EEPROMfunction(){
 };
 
 void controlEC(){ //switch mode --> codition of lv EC value --> Return state of relay
-  //static unsigned long lastSaveTimeAuto;
   static unsigned long lastSaveTimeMan;
   static unsigned long lastSaveTimeoOff;
   static unsigned long lastSaveTimeOffAuto;
   static bool StateRelayOfEC = false;
-  static const unsigned long PUMP_ON_TIME = 5000; // 5 seconds
-  static const unsigned long PUMP_OFF_TIME = 30000; // 60 seconds
+  static const unsigned long PUMP_ON_TIME = 3000; // 5 seconds
+  static const unsigned long PUMP_OFF_TIME = 120000; // 60 seconds
   static unsigned long last_pump_time = 0;
   static unsigned long lastPulseTime_A_Solution;
+  static int empty_A_count = 0;
 	static unsigned long lastPulseTime_B_Solution;
+  static int empty_B_count = 0;
 
 
   ecAuto = swAutoEC.get_status();
@@ -932,6 +933,8 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
     // Rtu relay off case 0
     stirPumpAB = LOW;
     last_pump_time = 0;
+    empty_A_count = 0;
+    empty_B_count = 0;
     if(StateRelayOfEC != false){
       relayRtu(2);
       StateRelayOfEC = false;
@@ -961,10 +964,21 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
         StateRelayOfEC = false;
         if(lastPulseTime_A_Solution+100 >= pulse_A_Solution){
           Serial.println("A sulution is not flow");
+          empty_A_count++;
         }
         if(lastPulseTime_B_Solution+100 >= pulse_B_Solution){
           Serial.println("B sulution is not flow");
+          empty_B_count++;
+        }else{
+          empty_A_count = 0;
+          empty_B_count = 0;
         }
+
+        if( empty_A_count >= 2 && empty_A_count >= 2){
+          String text  = "{\"ABSolutionEmptyTime\":" + String(empty_B_count) + "}";
+          notifyingPubMqtt(text);
+        }
+        
         last_pump_time = currentMillis;
       } else if (!StateRelayOfEC && (currentMillis - last_pump_time >= PUMP_OFF_TIME)) {
         // turn on pump
@@ -978,6 +992,8 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
     else{
       // Relay RTU Off
       last_pump_time = 0;
+      empty_A_count = 0;
+      empty_B_count = 0;
       stirPumpAB = LOW; //ปั๊มกวนปิด
       
       if(StateRelayOfEC != false){
@@ -997,6 +1013,8 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
     // Rtu relay on
     stirPumpAB = HIGH;
     last_pump_time = 0;
+    empty_A_count = 0;
+    empty_B_count = 0;
     if(StateRelayOfEC != true){
       relayRtu(1);
       StateRelayOfEC = true;
@@ -1017,13 +1035,15 @@ void controlEC(){ //switch mode --> codition of lv EC value --> Return state of 
 }
 
 void controlPH(){ //switch mode --> codition of lv pH value --> Return state of relay 
-  static unsigned long lastSaveTimeAuto;
   static unsigned long lastSaveTimeMan;
   static unsigned long lastSaveTimeoOff;
   static unsigned long lastSaveTimeOffElseAuto;
-  const int relayOnTime = 3000;     // Relay on time in milliseconds
-  const int relayOffTime = 60000;   // Relay off time in milliseconds
-  static bool relayStatePH;
+  static unsigned long last_pump_time = 0;
+  const int PUMP_ON_TIME = 3000;     // Relay on time in milliseconds
+  const int PUMP_OFF_TIME = 120000;   // Relay off time in milliseconds
+  static bool relayStatePH = false;
+  static unsigned long lastPulseTime_pH_Solution;
+  static int empty_ph_count = 0;
 
   phAuto = swAutoPH.get_status();
   phMan = swManPH.get_status();
@@ -1031,7 +1051,8 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
   // Select switch
   if((phAuto == 1)&&(phMan == 1)){ // swphModeOff
     stirPumpPh = LOW;
-    lastSaveTimeAuto = 0;
+    last_pump_time = 0;
+    empty_ph_count = 0;
 
     // Rtu relay off case 0
     if(relayStatePH != LOW){
@@ -1048,8 +1069,9 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
       //Serial.println("sw man on");
     }
   }
+
   else if ((phAuto == 0)&&(phMan == 1)){ //swphModeAuto
-    //-------------------- can add this condition in auto mode 
+    //คำนวณ
     if((lastPH > phHigh)&&(AdjustEcState != 1) && StatusOfPHsensor == 1 && changeWaterState == false && empty_tank == false && drain_state == false){ // pump pH solution to up pH value in water //anything else not auto ph with ec man
       AdjustPHState = 1;
     }
@@ -1060,53 +1082,54 @@ void controlPH(){ //switch mode --> codition of lv pH value --> Return state of 
       AdjustPHState = 0;
     }
 
-    /*if( relayStatePH != LOW && relayStateEC == HIGH ){ //else if 
-      relayRtu(4);
-      relayStatePH = LOW;
-    }*/
-    
     if(AdjustPHState == 1){
-      //pump กวน
-      stirPumpPh = HIGH;
-      if (currentMillis - lastSaveTimeAuto >= (relayStatePH == HIGH ? relayOnTime : relayOffTime)) {
-        // Toggle the state of the relay
-        relayStatePH = !relayStatePH;
-        if(relayStatePH == HIGH){
-          relayRtu(3);
-          relayStatePH = HIGH;        
+      stirPumpPh = HIGH; //pump กวน
+      if (relayStatePH && (currentMillis - last_pump_time >= PUMP_ON_TIME)) {  // turn off pump
+        relayRtu(4); 
+        relayStatePH = LOW;
+        last_pump_time = currentMillis;
+
+        if(lastPulseTime_pH_Solution+100 >= pulse_A_Solution){
+          Serial.println("pH sulution is not flow");
+          empty_ph_count++;
+        }else{
+          empty_ph_count = 0;
         }
-        else{
-          relayRtu(4);
-          relayStatePH = LOW;
+        
+        if(empty_ph_count > 2){
+          String text  = "{\"pHSolutionEmptyTime\":" + String(empty_ph_count) + "}";
+          notifyingPubMqtt(text);
+          //Blynk
+
         }
-        // Store the current time
-        lastSaveTimeAuto = currentMillis;
+      }else if(!relayStatePH && (currentMillis - last_pump_time >= PUMP_OFF_TIME)){ // turn on pump
+        relayRtu(3); 
+        relayStatePH = HIGH;
+        last_pump_time = currentMillis;
+        lastPulseTime_pH_Solution = pulse_phDownSolution;
       }
     }
-    else{
-      // Relay RTU Off 
-      lastSaveTimeAuto = 0;
+    else{// Relay RTU Off 
+      last_pump_time = 0;
+      empty_ph_count = 0;
       stirPumpPh = LOW;
       if(relayStatePH != LOW){
-        Serial.print("relayState ph mode auto else: ");
-        Serial.println(relayStatePH);
         relayRtu(4);
         relayStatePH = LOW;
       }
       
       if (currentMillis - lastSaveTimeOffElseAuto >= 120000U) {
-        Serial.print("relayState ph mode auto else: ");
-        Serial.println(relayStatePH);
         relayRtu(4);
         relayStatePH = LOW;
         lastSaveTimeOffElseAuto = currentMillis;
-        //Serial.println("sw man on");
-      }  
+      }
     }
   }
+
   else if ((phAuto == 1)&&(phMan == 0)){ //swphModeMan
-  stirPumpPh = HIGH;
-  lastSaveTimeAuto = 0;
+    stirPumpPh = HIGH;
+    last_pump_time = 0;
+    empty_ph_count = 0;
     // Rtu relay on
     if(relayStatePH != HIGH){
       Serial.print("relayState mode MAN: ");
