@@ -2437,6 +2437,88 @@ void calibration_pH_sensor(){
   }
 }
 
+bool EC_calibrat_state = false;
+float kValue = 1.38; //ยังไม่ได้จำใน eeprom
+void calibration_EC_sensor(){
+  float static sumVoltage;
+  float static count_time_read;
+  float static countDown = 10;
+  static int countdownLcd1 = 10;
+  static int countdownLcd2 = 60;
+  static unsigned long timePointLcd2 ,timePointLcd1;
+  float TdsFactor = 0.5;  // tds = ec / 2
+  float voltage;
+  float rawECsolution,KValueTemp;
+  float temperature = 25;
+  if(EC_calibrat_state){
+    if(currentMillis - timePointLcd1 >= 1000U && countdownLcd1 != 0 ){
+        timePointLcd1 = currentMillis;
+        countdownLcd1--;
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("EC Sensors - calibration");
+        lcd.setCursor(0,1);
+        lcd.print("Must have");
+        lcd.setCursor(0,2);
+        lcd.print("1. 1413us/cm buffer solution");
+    }
+
+    if(currentMillis - timePointLcd2 >= 1000U && countdownLcd1 == 0){      
+      voltage = tds.getVoltage();
+      if( voltage > 0.8 ){
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Stay Immerse the probe");
+        lcd.setCursor(0,1);
+        lcd.print("in 1413us/cm solution");
+        lcd.setCursor(0,2);
+        lcd.print("Saved in: " + String(countDown));
+        countDown--;
+        sumVoltage += voltage;
+        count_time_read++;
+        if(count_time_read >= 10){
+          //cal
+          float lastVoltage;
+          lastVoltage = sumVoltage/count_time_read;
+          rawECsolution = 707/(float)(TdsFactor); //707 is tds 707ppm
+          rawECsolution = rawECsolution*(1.0+0.02*(temperature-25.0));
+          KValueTemp = rawECsolution/(133.42*voltage*voltage*voltage - 255.86*voltage*voltage + 857.39*voltage);  //calibrate in the  buffer solution, such as 707ppm(1413us/cm)@25^c
+          kValue =  KValueTemp;
+          tds.kValue = kValue;
+          //return state is good
+          EC_calibrat_state = false;
+          Serial.println("success");
+        }
+
+      }else{
+        countDown = 10;
+        sumVoltage = 0;
+        count_time_read = 0;
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Immerse the probe into");
+        lcd.setCursor(0,1);
+        lcd.print("buffer solution.");
+        lcd.setCursor(0,2);
+        lcd.print("canceled in: " + String(countdownLcd2));        
+      }
+      if(countdownLcd2 == 0){
+        Serial.println("canceled");
+        EC_calibrat_state = false;
+        countdownLcd1 = 10;
+      }
+      
+      timePointLcd2 = currentMillis;
+      countdownLcd2--;
+    }
+
+  }else{
+    countdownLcd2 = 60;
+    return;
+  }
+
+}
+
 void release_valve(){
   static bool relay_state = LOW;
   if(release_valve_changewater == LOW && release_valve_drain == LOW){

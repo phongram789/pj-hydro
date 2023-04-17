@@ -10,10 +10,10 @@ class TDS{
     float ecValue,ecValue25;
     float temperature = 25;
     float tdsValue;
-    float kValue = 1.38;
     float KValueTemp,rawECsolution;
 
   public:
+    float kValue = 1.38;
     TDS(int pin){
       t_pin = pin;
     }
@@ -30,6 +30,12 @@ class TDS{
     float getTds(){
       return tdsValue;
     }
+    float getVoltage(){
+      analogValue = analogRead(t_pin);
+      voltage =analogValue/adcRange*aref;
+      return voltage;
+    }
+
     void getkkValue(){
       rawECsolution = 707/(float)(TdsFactor);
       rawECsolution = rawECsolution*(1.0+0.02*(temperature-25.0));
