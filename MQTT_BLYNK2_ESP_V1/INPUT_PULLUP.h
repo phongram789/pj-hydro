@@ -15,7 +15,8 @@ class swInput{
       
     }
   
-};//end of class
+};
+//end of class
 
 /*
 #include <arduino.h>
@@ -24,12 +25,12 @@ class swInput {
   private:
     int t_pin;
     unsigned long lastDebounceTime;
-    const unsigned long debounceDelay;
-
+    const unsigned long debounceDelay = 200;
+    bool lastButtonState;
   public:
-    swInput(int pin, unsigned long debounceDelay) {
+    swInput(int pin) {
       t_pin = pin;
-      this->debounceDelay = debounceDelay;
+      //this->debounceDelay = debounceDelay;
       pinMode(t_pin, INPUT_PULLUP);
     }
 
@@ -44,6 +45,5 @@ class swInput {
       }
       return lastButtonState;
     }
-};
+};*/
 
-*/

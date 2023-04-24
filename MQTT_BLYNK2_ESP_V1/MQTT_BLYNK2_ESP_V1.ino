@@ -1,6 +1,7 @@
 // ขา 0 , 2 ห้ามเป็น low
 //pzemRead และ waterRs485 และ RTC จะทำให้ ปู่ม pin 0 debouce มีปัญหา
-/*
+
+          /*
           Work list to do 
           -- esp32
           function to check flowing of A B n Acic
@@ -8,16 +9,14 @@
           function pumping went AB AB n Acid solutions r pumpping 
           function count water wnet fill tank n calculate bill of water
           function updatre version of smooth to read ec and ph
-
           function save all value should be save in eeprom
-
           checkflow_ รับค่าจาก blynk --> eeprom
-        
           -- node-red
           --reset อัตโนมัติเมื่อ เชื่อมไวไฟนานเกิน
 
           C:\Users\goodd\Documents\Arduino\libraries\blynk-library-master\src\Blynk\BlynkConfig.h
-*/
+          */
+
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <ESP32Ping.h>
@@ -66,7 +65,7 @@ float kValue = 1.38; //ยังไม่ได้จำใน eeprom
 
 
 //----------------water in tank-----------------
-float waterAmount; //ประกาศปริมาณน้ำที่วัดได้จาก Water flow sensor มีหน่วยเป็นลิตร
+long waterAmount =1000; //ประกาศปริมาณน้ำที่วัดได้จาก Water flow sensor มีหน่วยเป็นลิตร
 
 bool changeWater_state = 0; //ประกาศตัวแปรสำหรับเก็บสถานะฟังก์ชันการเปลี่ยนน้ำ 0 หมายถึงไม่ได้เปลี่ยนน้ำอยู่ 1 หมายถึงเปลี่ยนน้ำอยู่
 
@@ -186,10 +185,10 @@ swInput WaterLevel_Bottom(pinWaterLevel_Bottom);
 
 bool changeWaterState = false;
 
-bool release_valve_changewater = false;
-bool release_valve_drain = false;
-bool refill_valve_changeWater = false ;
-bool refill_valve_fill = false;
+bool release_valve_changewater = LOW;
+bool release_valve_drain = LOW;
+bool refill_valve_changeWater = LOW ;
+bool refill_valve_fill = LOW;
 
 WidgetLCD lcdBlynk(V16);
 
@@ -238,9 +237,6 @@ IPAddress subnet(255, 255, 0, 0);
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  /*if (!WiFi.config(local_IP, gateway, subnet)) {
-    Serial.println("STA Failed to configure");
-  }*/
   initEEPROM();
   lcd.init();
   lcd.backlight();
@@ -248,8 +244,7 @@ void setup() {
   initWiFi();
   mqtt.setServer(mqtt_server, mqtt_port);
   mqtt.setCallback(callback);
-  //Blynk.config(auth,"blynk.cloud", 8080);
-  Blynk.config(auth,"blynk.cloud", 8080);//worng server
+  Blynk.config(auth,"blynk.cloud", 8080);
   timer.setInterval(2000L, sendSensor);
   timer.setInterval(10000L, lcdBlynkPrint);
   timer.setInterval(6000L, readWaterTemp);
@@ -257,8 +252,8 @@ void setup() {
   timer.setInterval(1000L, StirPump);
   timer.setInterval(20000L, statusMqttMsg);
   timer.setInterval(1000L, PRINT);
-  timer.setInterval(30000L, release_valve);
-  timer.setInterval(30000L, refill_valve);
+  timer.setInterval(10000L, release_valve);
+  timer.setInterval(10000L, refill_valve);
   timer.setInterval(1000L, empty_check_Water);
 
 
@@ -287,6 +282,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(flow_B_Solution_pin), pulseCounter_B_Solution, FALLING);
 
   dht.begin();
+  tds.kValue = kValue;
   delay(500);
   closeRTU();
 }
@@ -399,7 +395,6 @@ void Mqttreconnect(){ //ฟังก์ชันตรวจสอบสถา�
       error_con_time++;
       if(error_con_time > 10){
         //Serial.print("Err Mqtt : " + String(error_con_time)+" time" );
-        //lcd
       }
       statusMqtt = mqtt.connected(); // return status of mqtt now
       Serial.print("MQTT connection... ");
@@ -469,6 +464,10 @@ void initWiFi() { //ฟังก์ชันนี้จะทำการเช
   while (WiFi.status() != WL_CONNECTED) {
     count_time++;
     if(count_time > 30){
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("ESP WLL RESTART");
+      delay(10000);
       ESP.restart();
     }
     Serial.print('.');
@@ -543,12 +542,28 @@ void initEEPROM() {  //ฟังก์ชัน initEEPROM จะทำการ
   milleHour = EEPROM.read(address);
   address += sizeof(HourUpdateRTC);
   HourUpdateRTC = EEPROM.read(address);
+  
+  //---
   address += sizeof(waterAmount);
-  waterAmount = EEPROM.read(address);
+  EEPROM.get(address, waterAmount);
   address += sizeof(acidVoltage);
   EEPROM.get(address, acidVoltage);
   address += sizeof(neutralVoltage);
   EEPROM.get(address, neutralVoltage);
+  //---
+  address += sizeof(kValue);
+  EEPROM.get(address, kValue);
+
+  /*address += sizeof(ft);
+  EEPROM.get(address, ft);*/
+
+
+  Serial.println("HourUpdateRTC: " + String(HourUpdateRTC));
+  Serial.println("waterAmount: " + String(waterAmount));
+  Serial.println("acidVoltage: " + String(acidVoltage));
+  Serial.println("neutralVoltage: " + String(neutralVoltage));
+  Serial.println("kValue: " + String(kValue));
+  Serial.println("ft: " + String(ft));
 };
 
 void callback(char* topic,byte* payload, unsigned int length) { //ฟังก์ชัน callback เป็นฟังก์ชันที่ถูกเรียกใช้เมื่อมีการรับข้อความจากโบรกเกอร์ MQTT 
@@ -676,8 +691,14 @@ void callback(char* topic,byte* payload, unsigned int length) { //ฟังก�
   }
 
   if (String(topic) == "@msg/kmutnb/cs/smart-hydro1/calibrat-ph") { 
-      //pH_calibrat_state = msg.toInt();
+    bool toggle = pH_calibrat_state;
     if(msg.toInt() == 1){
+      toggle = !toggle;
+    }else{
+      return;
+    }
+      //pH_calibrat_state = msg.toInt();
+    if(toggle == 1){
       if(EC_calibrat_state == true){
         EC_calibrat_state = false;
         pH_calibrat_state = msg.toInt();
@@ -687,12 +708,20 @@ void callback(char* topic,byte* payload, unsigned int length) { //ฟังก�
     }else{
       pH_calibrat_state = msg.toInt();
     }
-    String text  = "{\"calibrat-ph\":" + String(pH_calibrat_state) + "}";
+    String text  = "{\"calibrationPH\":" + String(pH_calibrat_state) + "}";
     notifyingPubMqtt(text);
     
   }
+
   if (String(topic) == "@msg/kmutnb/cs/smart-hydro1/calibrat-ec") { 
+    bool toggle = EC_calibrat_state;
     if(msg.toInt() == 1){
+      toggle = !toggle;
+    }else{
+      return;
+    }
+
+    if(toggle == 1){
       if(pH_calibrat_state == true){
         pH_calibrat_state = false;
         EC_calibrat_state = msg.toInt();
@@ -702,7 +731,7 @@ void callback(char* topic,byte* payload, unsigned int length) { //ฟังก�
     }else{
       EC_calibrat_state = msg.toInt();
     }
-    String text  = "{\"calibrat-ec\":" + String(EC_calibrat_state) + "}";
+    String text  = "{\"calibratEC\":" + String(EC_calibrat_state) + "}";
     notifyingPubMqtt(text);
   }
 };
@@ -730,6 +759,7 @@ void reconnectBlynk(){ // ฟังก์ชันตรวจสอบสถา
         statusBlynk = Blynk.connected();
       }else{
         statusBlynk = 0;
+        statusBlynk = Blynk.connect(1000UL);
       }
       //Serial.println("Blynk: "+String(Blynk.connected()));
       errorTime = 0;
@@ -772,7 +802,7 @@ void functionLcd(){ // เป็นฟังก์ชั่นที่ใช้
         case 0:
           lcd.clear();
           lcd.setCursor(0,0);
-          lcd.print("Temp  :" + String(temp_room) + " c"); //"/n"
+          lcd.print("Temp  :" + String(temp_room) + " c");
           lcd.setCursor(0,1);
           lcd.print("humid :" + String(hum_room) + " %");
           lcd.setCursor(0,2);
@@ -821,11 +851,6 @@ void functionLcd(){ // เป็นฟังก์ชั่นที่ใช้
           lcd.setCursor(0,2);
           lcd.print(String("Off Time: ") + stopHour + ":" + stopMinute + ":" + stopSecond);
 
-          
-          // timer
-          // rtc
-          // ec set
-          // pH set
           break;
       }
     }
@@ -876,7 +901,7 @@ void pzemRead(){ //ฟังก์ชันอ่านค่าไฟฟ้า�
             countError=0;
             
             Unit = energy ;//หาค่าค่าพลังงานโดยกำหนดค่าตัวแปร Unit เท่ากับ energy และคำนวณค่า energyprice โดยใช้ฟังก์ชัน calEnergyPrice()
-            if(ft == NULL){
+            if(ft == 0.00){
               ft = 93.49;
             }
             energyprice = calEnergyPrice(Unit,ft);
@@ -991,15 +1016,27 @@ void EEPROMfunction(){ //ฟังก์ชัน EEPROMfunction() จะทำ�
     EEPROM.write(address, HourUpdateRTC); 
     //-----ยังไม่ได้ทดสอบ
     address += sizeof(waterAmount);
-    EEPROM.write(address, waterAmount);
+    EEPROM.put(address, waterAmount);
     //-----
     address += sizeof(acidVoltage);
     EEPROM.put(address, acidVoltage);
     address += sizeof(neutralVoltage);
     EEPROM.put(address, neutralVoltage);
 
+    //kValue
+    address += sizeof(kValue);
+    EEPROM.put(address, kValue);
+
+    //ft ไฟฟ้า
+    address += sizeof(ft);
+    EEPROM.put(address, ft);
+
     EEPROM.commit();
 
+    /*Serial.println("waterAmount: " + String(waterAmount));
+    Serial.println("acidVoltage: " + String(acidVoltage));
+    Serial.println("neutralVoltage: " + String(neutralVoltage));
+    Serial.println("kValue: " + String(kValue));*/
     //Serial.println("EEPROM Done");
     //work list is done
 
@@ -1071,11 +1108,11 @@ void controlEC(){ //ฟังก์ชันควบคุมปั๊มปุ
         re_off_pump = false;
         count_re_off = 0;
         if(lastPulseTime_A_Solution+100 >= pulse_A_Solution){ //หากค่าพัลส์ที่ได้จากเซ็นเซอร์ตรวจสอบการนไหลครั้งก่อน lastPulseTime_A_Solution+100 มากกว่าค่าพัลส์ล่าสุด pulse_A_Solution จะบวกค่าให้กับตัวแปร empty_A_count
-          Serial.println("A sulution is not flow");
+          Serial.println("A sulution is not flow: " +String(lastPulseTime_A_Solution));
           empty_A_count++;
         }
         if(lastPulseTime_B_Solution+100 >= pulse_B_Solution){ //หากค่าพัลส์ที่ได้จากเซ็นเซอร์ตรวจสอบการนไหลครั้งก่อน lastPulseTime_B_Solution+100 มากกว่าค่าพัลส์ล่าสุด pulse_B_Solution จะบวกค่าให้กับตัวแปร empty_B_count
-          Serial.println("B sulution is not flow");
+          Serial.println("B sulution is not flow:" + String(lastPulseTime_B_Solution));
           empty_B_count++;
         }else{ // ถ้าเซ็นเซอร์สามารถอ่านค่าได้จะรีเซ็ตค่าที่นับมา
           empty_A_count = 0;
@@ -1083,7 +1120,7 @@ void controlEC(){ //ฟังก์ชันควบคุมปั๊มปุ
         }
         // หากตรวจพบว่าไม่มีการไหลของสาร A และ B Solution
         if( empty_A_count >= 2 && empty_A_count >= 2){ // ถ้าไม่สามารถตรวจสอบการไหลได้มากกว่าหรือเท่ากับ 2 จะทำการส่งข้อมูลผ่าน MQTT ที่ระบุว่า AB Solution ไม่ไหล
-          String text  = "{\"ABSolutionEmptyTime\":" + String(empty_B_count) + "}";
+          String text  = "{\"abSolutionEmptyTime\":" + String(empty_B_count) + "}";
           notifyingPubMqtt(text);
         }
         last_pump_time = currentMillis;
@@ -1172,6 +1209,9 @@ void controlPH(){ //ฟังก์ชันควบคุมปั๊ม pH Do
   static unsigned long lastPulseTime_pH_Solution; //ตัวแปรสำหรับเก็บค่า Pulse ที่ได้จากเซ็นเซอร์ flow สารลด pH ของครั้งล่าสุด
   static int empty_ph_count = 0; //ตัวแปรสำหรับเก็บค่าเมื่อเซ็นเซอร์ตรวจการไหลไม่สามารถตรวจจับการไหลของสารลด pH ได้
 
+  static bool re_off_pump = false;
+  static int count_re_off = 0;
+
   //ค่า phAuto และ phMan ถูกกำหนดโดยการเรียกใช้เมธอด get_status() เพื่ออ่านค่าสวิตช์จากตู้ควบคุม 
   phAuto = swAutoPH.get_status();
   phMan = swManPH.get_status();
@@ -1182,6 +1222,8 @@ void controlPH(){ //ฟังก์ชันควบคุมปั๊ม pH Do
     stirPumpPh = LOW;
     last_pump_time = 0;
     empty_ph_count = 0;
+    count_re_off = 0;
+    re_off_pump = true;
 
     // Rtu relay off case 0
     if(relayStatePH != LOW){
@@ -1217,9 +1259,12 @@ void controlPH(){ //ฟังก์ชันควบคุมปั๊ม pH Do
     //ถ้า AdjustPHState เป็น 1 จะทำการปั๊มลดค่า pH สลับปั๊มกับหยุดปั๊ม โดยเวลาที่ปั๊มจะเท่ากับค่า PUMP_ON_TIME และ ช่วงที่หยุดปั๊มจะเท่ากับ PUMP_OFF_TIME
     if(AdjustPHState == 1){
       stirPumpPh = HIGH; //pump กวน
-      if (relayStatePH && (currentMillis - last_pump_time >= PUMP_ON_TIME)) {  // turn off pump
+      if (relayStatePH && (currentMillis - last_pump_time >= PUMP_ON_TIME)) {  
+        // turn off pump
         relayRtu(4); 
         relayStatePH = LOW;
+        re_off_pump = false;
+        count_re_off = 0;
         last_pump_time = currentMillis;
 
         if(lastPulseTime_pH_Solution+100 >= pulse_phDownSolution){ //หากค่าพัลส์ที่ได้จากเซ็นเซอร์ตรวจสอบการนไหลครั้งก่อน lastPulseTime_pH_Solution+100 มากกว่าค่าพัลส์ล่าสุด pulse_pHDownSolution จะบวกค่าให้กับตัวแปร empty_ph_count
@@ -1237,17 +1282,32 @@ void controlPH(){ //ฟังก์ชันควบคุมปั๊ม pH Do
 
         }
       
-      }else if(!relayStatePH && (currentMillis - last_pump_time >= PUMP_OFF_TIME)){ // turn on pump
+      }else if(!relayStatePH && (currentMillis - last_pump_time >= PUMP_OFF_TIME)){ 
+        // turn on pump
         relayRtu(3); 
         relayStatePH = HIGH;
+        count_re_off = 0;
+        re_off_pump = true;
         last_pump_time = currentMillis;
         lastPulseTime_pH_Solution = pulse_phDownSolution;
+      }else{
+
+
+        if (currentMillis - lastSaveTimeOffElseAuto >= 1000U && re_off_pump == false && count_re_off <= 3) {
+        count_re_off++;
+        relayRtu(4);
+        relayStatePH = LOW;
+        lastSaveTimeOffElseAuto = currentMillis;
+      }
+
       }
     }
     else{// Relay RTU Off 
       last_pump_time = 0;
       empty_ph_count = 0;
       stirPumpPh = LOW;
+      count_re_off = 0;
+      re_off_pump = true;
       if(relayStatePH != LOW){
         relayRtu(4);
         relayStatePH = LOW;
@@ -1266,6 +1326,8 @@ void controlPH(){ //ฟังก์ชันควบคุมปั๊ม pH Do
     stirPumpPh = HIGH;
     last_pump_time = 0;
     empty_ph_count = 0;
+    count_re_off = 0;
+    re_off_pump = true;
     // Rtu relay on
     if(relayStatePH != HIGH){
       Serial.print("relayState mode MAN: ");
@@ -1766,20 +1828,20 @@ void settime(byte Year,byte Month,byte Date,byte DoW,byte Hour,byte Minute,byte 
   Serial.println("Time update to RTC module done with " + String(countSetError) + " time.");
 }
 
-BLYNK_WRITE(V10){
+BLYNK_WRITE(V10){//รับค่าเปิด-ปิดไฟ1
   GrowLightControl1 = param.asInt();
   Serial.println(GrowLightControl1);
 }
-BLYNK_WRITE(V11){
+BLYNK_WRITE(V11){//รับค่าเปิด-ปิดไฟ2
   GrowLightControl2 = param.asInt();
   Serial.println(GrowLightControl2);
 
 }
-BLYNK_WRITE(V12){
+BLYNK_WRITE(V12){//รับค่าเปิด-ปิดไฟ3
   GrowLightControl3 = param.asInt();
   Serial.println(GrowLightControl3);
 }
-BLYNK_WRITE(V13){
+BLYNK_WRITE(V13){//รับค่าเปิด-ปิดไฟ4
   GrowLightControl4 = param.asInt();
   Serial.println(GrowLightControl4);
 }
@@ -1787,32 +1849,32 @@ BLYNK_WRITE(V14){ //main pump
   mainWaterPump = param.asInt();
   Serial.println("pump blynk :" + String(mainWaterPump));
 }
-BLYNK_WRITE(V17){
+BLYNK_WRITE(V17){//รับค่า pH ขั้นต่ำ
   phLow = param.asFloat();
 
 }
-BLYNK_WRITE(V18){
+BLYNK_WRITE(V18){//รับค่า pH ขั้นสูง
   phHigh = param.asFloat();
 }
-BLYNK_WRITE(V19){
+BLYNK_WRITE(V19){//รับค่า EC ขั้นต่ำ
   ecLow = param.asFloat();
 }
-BLYNK_WRITE(V20){
+BLYNK_WRITE(V20){//รับค่า EC ขั้นสูง
   ecHigh = param.asFloat();
 }
-BLYNK_WRITE(V22){
+BLYNK_WRITE(V22){//รับค่า ft ไฟฟ้า
   ft = param.asFloat();
 }
-BLYNK_WRITE(V26){
+BLYNK_WRITE(V26){//รับค่าการเปิดฟังก์ชัน check flow
   checkflow_ = param.asInt();
 }
-BLYNK_WRITE(V27){
+BLYNK_WRITE(V27){//รับค่าการเปิดฟังก์ชันเปลี่ยนน้ำ
   changeWaterState = param.asInt();
   if(changeWaterState == true){
         drain_state = false;
   }
 }
-BLYNK_WRITE(V31){
+BLYNK_WRITE(V31){//รับค่าการเปิดฟังก์ชันถ่ายน้ำ
   if(param.asInt() == 1){
     drain_state = true;
     //off other function about water
@@ -1822,7 +1884,7 @@ BLYNK_WRITE(V31){
     drain_state = false;
   }
 }
-BLYNK_WRITE(V28){
+BLYNK_WRITE(V28){//รับค่าการรีเซ็ทค่าไฟฟ้า
   int reset = param.asInt();
   if(reset == 1){
     //clearSerial2Buffer();
@@ -1831,7 +1893,7 @@ BLYNK_WRITE(V28){
   }
 }
 
-BLYNK_WRITE(V33){
+BLYNK_WRITE(V33){//รับค่าการเปิดฟังก์ชัน calibrat pH
   if(param.asInt() == 1){
     if(EC_calibrat_state == false){
       pH_calibrat_state = param.asInt();
@@ -1843,7 +1905,7 @@ BLYNK_WRITE(V33){
     pH_calibrat_state = param.asInt();
   }
 }
-BLYNK_WRITE(V34){
+BLYNK_WRITE(V34){//รับค่าการเปิดฟังก์ชัน calibrat EC
   //EC_calibrat_state = param.asInt();
   if(param.asInt() == 1){
     if(pH_calibrat_state == true){
@@ -1879,8 +1941,6 @@ void lcdBlynkPrintError(String text){
   lcdBlynk.print(0, 0, text); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
 }
 
-
-
 float calEnergyPrice(float Unit , float ft) {
   float total = 0;
   if (Unit <= 150) {
@@ -1890,7 +1950,7 @@ float calEnergyPrice(float Unit , float ft) {
     float Rate100 = 3.6237; //65 หน่วยต่อไป (หน่วยที่ 36-100) หน่วยละ 3.6237 บาท
     float Rate150 = 3.7171; //50 หน่วยต่อไป (หน่วยที่ 101-150) หน่วยละ 3.7171 บาท
 
-    if (Unit >= 6) total += _min(Unit, 15) * Rate15; //ตรวจสอบว่าจำนวนหน่วยไฟฟ้า (Unit) ที่รับเข้ามามีค่ามากกว่าหรือเท่ากับ 6 หรือไม่ ถ้ามีจะทำการคำนวณราคาไฟฟ้าในช่วงหน่วยไฟฟ้า 6-15 โดยใช้เรทและบวกผลลัพธ์ลงในตัวแปร total
+    if (Unit >= 0.01) total += _min(Unit, 15) * Rate15; //ตรวจสอบว่าจำนวนหน่วยไฟฟ้า (Unit) ที่รับเข้ามามีค่ามากกว่าหรือเท่ากับ 6 หรือไม่ ถ้ามีจะทำการคำนวณราคาไฟฟ้าในช่วงหน่วยไฟฟ้า 6-15 โดยใช้เรทและบวกผลลัพธ์ลงในตัวแปร total
     if (Unit >= 16) total += _min(Unit - 15, 10) * Rate25; //ตรวจสอบว่าจำนวนหน่วยไฟฟ้า (Unit) ที่รับเข้ามามีค่ามากกว่าหรือเท่ากับ 16 หรือไม่ ถ้าใช่จะทำการคำนวณราคาไฟฟ้าในช่วงหน่วยไฟฟ้า 16-25 ราคารเรท Rate25 และบวกผลลัพธ์ลงในตัวแปร total
     if (Unit >= 26) total += _min(Unit - 25, 10) * Rate35; //ตรวจสอบว่าจำนวนหน่วยไฟฟ้า (Unit) ที่รับเข้ามามีค่ามากกว่าหรือเท่ากับ 26 หรือไม่ ถ้าใช่จะทำการคำนวณราคาไฟฟ้าในช่วงหน่วยไฟฟ้า 26-25 ราคารเรท Rate25 และบวกผลลัพธ์ลงในตัวแปร total
     if (Unit >= 36) total += _min(Unit - 35, 65) * Rate100; //ตรวจสอบว่าจำนวนหน่วยไฟฟ้า (Unit) ที่รับเข้ามามีค่ามากกว่าหรือเท่ากับ 36 หรือไม่ ถ้าใช่จะทำการคำนวณราคาไฟฟ้าในช่วงหน่วยไฟฟ้า 36-65 ราคารเรท Rate65 และบวกผลลัพธ์ลงในตัวแปร total
@@ -2036,6 +2096,7 @@ void waterRs485(){
 void checkFlow() {
   static unsigned long lastCheckTime1 = 0;
   static unsigned int lastPulseCount = 0;
+  static int count_no_flow = 0;
   // ตรวจสอบว่าเวลาผ่านไปห้านาทีหลังการตรวจสอบครั้งล่าสุดหรือไม่โดยที่ checkflow_ เป็นจริง และ changeWaterState การเปลี่ยนน้ำเป็นเท็จ
   if (currentMillis - lastCheckTime1 >= 300000 && checkflow_ == true && changeWaterState == false && empty_tank == false && drain_state == false && mainWaterPump == HIGH) {
     unsigned int currentPulseCount = pulse_plantingTrough; // เก็บจำนวนพัลส์ปัจจุบัน
@@ -2061,8 +2122,8 @@ void checkFlow() {
       String text  = "{\"flowingWater\":" + String(flowwing) + "}";
       notifyingPubMqtt(text);
 
-      Serial.println("checkFlow good --------------------------------------");
-      Serial.println("currentPulseCount-lastPulseCount = : " +String(currentPulseCount-lastPulseCount));
+      //Serial.println("checkFlow good --------------------------------------");
+      //Serial.println("currentPulseCount-lastPulseCount = : " +String(currentPulseCount-lastPulseCount));
     }
 
     // เก็บเวลาและจำนวนพัลส์ปัจจุบันเพื่อใช้ตรวจสอบครั้งต่อไป
@@ -2088,7 +2149,7 @@ void fillWater(){
     if(currentMillis - timepoint_count >= 1000U && switch_WaterLevel_Top == 1){  //นับเวลาทุกๆ 10 วิ และ ค่าที่ได้จะเป็น 1 หรือระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์
       timepoint_count = currentMillis; //เป็นการเก็บเวลาที่ระบบทำงานไปแล้ว
       countTime++; //นับเวลาที่ระดับน้ำอยู่ต่ำกว่าเซ็นเซอร์
-      Serial.println("time fill :"+String(countTime));
+      //Serial.println("time fill :"+String(countTime));
     }else{
       
     }
@@ -2098,15 +2159,17 @@ void fillWater(){
       if(state_of_valve == LOW){ //ถ้า state_of_valve เป็นเท็จ หรือวาลว์ยังไม่ได้เปิด จะทำการเปิดให้น้ำไหลเติมถังน้ำ
         pulse_WaterTank = 0;  // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
         //rtu on  //สั่งการทำงานให้วาล์วเปิด
-        relayRtu(17);
+        //relayRtu(17);
         state_of_valve = HIGH;  //เปลี่ยนสถานะของวาล์วเป็นจริง
         
       }
       refill_valve_fill = HIGH;
       if(currentMillis - timepoint_Store_water >= 5000U ){ // ทุกๆ 5 วิ จะทำการจัดเก็บจำนวนน้ำที่ไหลผ่านเข้าถัง
+        float Factor = 7.5; //calibration factor
+        float flowRate = pulse_WaterTank/Factor; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตร
         Serial.println("waterAmount: " + String(waterAmount));
         timepoint_Store_water = currentMillis; //จัดเก็บเวลาใช้สำหรับรอบต่อไป
-        waterAmount += pulse_WaterTank/7.5; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตร
+        waterAmount += flowRate/60; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตรต่อ 1 นาที
         pulse_WaterTank = 0; // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
       }
     }
@@ -2114,7 +2177,7 @@ void fillWater(){
       //turn off valve to fill water in tank
       if(state_of_valve == HIGH){ //ถ้า state_of_valve เป็นจริง หรือวาลว์ยังเปิดอยู่ จะทำการปิดวาล์วเพื่อหยุดเติมน้ำ
         //rtu off //สั่งการทำงานให้วาล์วปิด
-        relayRtu(18);
+        //relayRtu(18);
         state_of_valve =  LOW; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
         waterAmount += pulse_WaterTank/7.5; // คำนวณจำนวนพลัลส์ที่นับได้ไปเป็นจำนวนลิตร
         pulse_WaterTank = 0; // รีเซ็ตค่าที่อ่าจได้จาก Water flow เท่ากับ 0
@@ -2126,7 +2189,7 @@ void fillWater(){
 
     if(state_of_valve == HIGH){
       //rtu off  //สั่งการทำงานให้วาล์วปิด
-      relayRtu(18);
+      //relayRtu(18);
       state_of_valve = LOW; //เปลี่ยนสถานะของวาล์วเป็นเท็จ
       
     }
@@ -2168,7 +2231,7 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
         timepoint = currentMillis; //store timepoint
         countTime++; //count 1 = 10 sec.
         countTimeEmpty = 0;
-        Serial.println("countTime : "+String(countTime));
+        //Serial.println("countTime : "+String(countTime));
         }
     }
     else if(switch_WaterLevel_Top == 1 && switch_WaterLevel_Bottom == 1){
@@ -2176,7 +2239,7 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
         timepoint_empty = currentMillis; //store timepoint
         countTimeEmpty++; //count 1 = 10 sec.
         countTime = 0;
-        Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+        //Serial.println("countTimeEmpty : "+String(countTimeEmpty));
       }
     }
     else{
@@ -2190,7 +2253,7 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
       //release water ปล่อยน้ำ
       if(release_valveState == LOW){
         release_valveState = HIGH;
-        relayRtu(19);
+        //relayRtu(19);
         release_valve_changewater = HIGH;
         //RTU ON VALVE
       }
@@ -2212,14 +2275,15 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
       if(refill_valveState == LOW){
         refill_valveState = HIGH;
         //RTU ON VALVE FILL
-        relayRtu(17);
-        refill_valve_changeWater = HIGH;
+        //relayRtu(17);
+        
       }
+      refill_valve_changeWater = HIGH;
       filling = true;
       if(currentMillis - timepoint_fill >= 10000U){
         timepoint_fill = currentMillis; //store timepoint
-        Serial.println("fill water");
-        Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+        //Serial.println("fill water");
+        //Serial.println("countTimeEmpty : "+String(countTimeEmpty));
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.print("filling the tank");
@@ -2233,21 +2297,22 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
       if(refill_valveState == HIGH){
         refill_valveState = LOW;
         //RTU OFF VALVE FILL
-        relayRtu(18);
-        refill_valve_changeWater = LOW;
+        //relayRtu(18);
+        
       }
+      refill_valve_changeWater = LOW;
       if(release_valveState == HIGH){
         release_valveState = LOW;
         //RTU OFF VALVE
-        relayRtu(20);
+        //relayRtu(20);
         release_valve_changewater = LOW;
       }
       
       if(currentMillis - timepoint_waiting >= 10000U){
         timepoint_waiting = currentMillis; //store timepoint
-        Serial.println("not release water n not fill water");
-        Serial.println("countTimeEmpty : "+String(countTimeEmpty));
-        Serial.println("countTime : "+String(countTime));
+        //Serial.println("not release water n not fill water");
+        //Serial.println("countTimeEmpty : "+String(countTimeEmpty));
+        //Serial.println("countTime : "+String(countTime));
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.print("waiting");
@@ -2262,15 +2327,17 @@ void changeWater(bool changeWater_state){ // dashboard 1,0 ---> 1 ----> changeWa
     if(refill_valveState == HIGH){
       refill_valveState = LOW;
       //RTU OFF VALVE refill
-      relayRtu(18);
-      refill_valve_changeWater = LOW;
+      //relayRtu(18);
+      
     }
+    refill_valve_changeWater = LOW;
     if(release_valveState == HIGH){
       release_valveState = LOW;
-      release_valve_changewater = LOW;
+      
       //RTU OFF VALVE out
-      relayRtu(20);
+      //relayRtu(20);
     }
+    release_valve_changewater = LOW;
     changeWaterState = false;
     filling = false;
     countTimeEmpty = 0;
@@ -2351,7 +2418,7 @@ void drainWater(){
       
       if(release_valve == HIGH){
         //RTU OFF
-        relayRtu(20);
+        //relayRtu(20);
         release_valve = LOW;
         
       } 
@@ -2375,7 +2442,7 @@ void drainWater(){
       
       if(release_valve == LOW){
         //RTU ON
-        relayRtu(19);
+        //relayRtu(19);
         release_valve = HIGH;
                 
       }
@@ -2386,7 +2453,7 @@ void drainWater(){
     // off valve
     if(release_valve == HIGH){
         //RTU OFF
-        relayRtu(20);
+        //relayRtu(20);
       release_valve = LOW;
       
     } 
@@ -2473,6 +2540,8 @@ void calibration_pH_sensor(){
           lcd.setCursor(0,0);
           lcd.print("Saved Natural Solution");
           Serial.println("neutralVoltage save:"+ String(neutralVoltage));
+          String text  = "{\"calibrationPH\":\"Save-neutral\"}";
+          notifyingPubMqtt(text);
 
         }
       }
@@ -2505,6 +2574,8 @@ void calibration_pH_sensor(){
           lcd.setCursor(0,0);
           lcd.print("Saved Acid Solution");
           Serial.println("acidVoltage save:"+ String(acidVoltage));
+          String text  = "{\"calibrationPH\":\"Save-acid\"}";
+          notifyingPubMqtt(text);
         }
       }
       else if( save_pH_acid_Voltage == true && save_pH_natural_Voltage == true){
@@ -2513,7 +2584,7 @@ void calibration_pH_sensor(){
         lcd.print("Saved All Solution");
         lcd.setCursor(0,1);
         lcd.print(":D");
-        String text  = "{\"calibration-ph\":\"success\"}";
+        String text  = "{\"calibration-ph\":\"done\"}";
         notifyingPubMqtt(text);
         pH_calibrat_state = false;
         Blynk.virtualWrite(V33,pH_calibrat_state);
@@ -2557,7 +2628,7 @@ void calibration_pH_sensor(){
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.print("canceled....");
-        String text  = "{\"calibration-ph\":\"canceled\"}";
+        String text  = "{\"calibrationPH\":" + String(pH_calibrat_state) + "}";
         notifyingPubMqtt(text);
         Blynk.virtualWrite(V33,pH_calibrat_state);
       }
@@ -2616,8 +2687,8 @@ void calibration_EC_sensor(){
         lcd.print("in 1413us/cm solution");
         lcd.setCursor(0,2);
         lcd.print("Saved in: " + String(countDown));
-        lcd.setCursor(0,3);
-        lcd.print("voltage is: " + String(voltage));
+        /*lcd.setCursor(0,3);
+        lcd.print("voltage is: " + String(voltage));*/
         countDown--;
         sumVoltage += voltage;
         count_time_read++;
@@ -2635,6 +2706,8 @@ void calibration_EC_sensor(){
           Serial.println("kValue:" + String(kValue));
           Serial.println("success");
           Blynk.virtualWrite(V34,EC_calibrat_state);
+          String text  = "{\"calibratEC\":\"done\"}";
+          notifyingPubMqtt(text);
         }
 
       }else{
@@ -2659,6 +2732,8 @@ void calibration_EC_sensor(){
         EC_calibrat_state = false;
         countdownLcd1 = 10;
         Blynk.virtualWrite(V34,EC_calibrat_state);
+        String text  = "{\"calibratEC\":" + String(EC_calibrat_state) + "}";
+        notifyingPubMqtt(text);
       }
       
       timePointLcd2 = currentMillis;
@@ -2671,45 +2746,40 @@ void calibration_EC_sensor(){
 
 }
 
-
-
-
-
 void release_valve(){ //change function , drain function
   static bool relay_state = LOW;
   if(release_valve_changewater == LOW && release_valve_drain == LOW){
     // off valve
     if(relay_state == HIGH){
-
+      relayRtu(20);
       relay_state = LOW;
     }
     // on valve
   }else{
     if(relay_state == LOW){
-      
+      relayRtu(19);
       relay_state = HIGH;
     }
   }
-  Serial.println("release_valve: " + String(relay_state));
+  //Serial.println("release_valve: " + String(relay_state));
 }
-
 
 void refill_valve(){ //fill function change function
   static bool relay_state = LOW;
   if(refill_valve_changeWater == LOW && refill_valve_fill == LOW){
     // on valve
     if(relay_state == HIGH){
-
+      relayRtu(18);
       relay_state = LOW;
     }
     // on valve
   }else{
     if(relay_state == LOW){
-      
+      relayRtu(17);
       relay_state = HIGH;
     }
   }
-  Serial.println("refill_valve: " + String(relay_state));
+  //Serial.println("refill_valve: " + String(relay_state));
 }
 /*//----------------new relay Rtu
 void relayRtu(int condition){ // manage state of relay on/off ch.
